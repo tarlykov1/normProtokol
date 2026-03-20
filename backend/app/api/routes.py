@@ -1,6 +1,8 @@
 from datetime import datetime
 from pathlib import Path
+import re
 import shutil
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -9,32 +11,44 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.entities import AuditLog, Protocol, TaskCandidate, Topic
+from app.models.enums import ProtocolStatus, TaskStatus
 from app.schemas.common import (
-    AssignPayload,
     BulkAssignPayload,
-    BulkDeadlinePayload,
-    BulkTopicPayload,
     MergePayload,
     MoveTopicPayload,
     ProtocolRead,
-    PublishReport,
+    PublishResponse,
     ReorderPayload,
     SplitPayload,
     TaskCreate,
     TaskPatch,
     TaskRead,
     TopicCreate,
+    TopicPatch,
     TopicRead,
+    ValidationResponse,
+    ValidationTaskResult,
 )
-from app.services.bitrix.bitrix_service import BitrixService
+from app.services.bitrix.bitrix_service import MockBitrixService, RealBitrixService
 from app.services.exporter.docx_exporter import export_protocol_docx
-from app.services.normalizer.text_normalizer import normalize_text
+from app.services.normalizer.task_extractor import extract_task_candidates, load_task_keywords
 from app.services.parser.docx_parser import extract_docx_text
-from app.services.parser.task_extractor import extract_task_candidates
+from app.services.topics.matcher import load_topics
 from app.services.validator.task_validator import validate_duplicates, validate_task
 
-router = APIRouter(prefix="/api")
-bitrix = BitrixService(mock_mode=settings.bitrix_mock_mode)
+router = APIRouter(prefix="/api", tags=["protocols"])
+
+
+def _bitrix_service():
+    if settings.bitrix_mode == "real":
+        return RealBitrixService(settings.bitrix_base_url, settings.bitrix_webhook)
+    return MockBitrixService(settings.mock_users_path)
+
+
+def _safe_filename(name: str) -> str:
+    base = Path(name).name
+    safe = re.sub(r"[^a-zA-Zа-яА-Я0-9_.-]", "_", base)
+    return f"{uuid4().hex}_{safe}"
 
 
 def _get_protocol(db: Session, protocol_id: int) -> Protocol:
@@ -49,82 +63,200 @@ def _get_protocol(db: Session, protocol_id: int) -> Protocol:
     return protocol
 
 
-@router.post("/protocols/upload", response_model=ProtocolRead)
+@router.post("/protocols/upload", response_model=ProtocolRead, tags=["protocols"])
 def upload_protocol(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    if not file.filename.lower().endswith(".docx"):
+    if not file.filename or not file.filename.lower().endswith(".docx"):
         raise HTTPException(status_code=400, detail="Only .docx files are supported")
 
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
-    destination = settings.uploads_dir / f"{timestamp}_{file.filename}"
+    destination = settings.uploads_dir / _safe_filename(file.filename)
     with destination.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
     extracted_text, chunks = extract_docx_text(destination)
-    normalized = normalize_text(extracted_text)
-
     protocol = Protocol(
         original_filename=file.filename,
         original_file_path=str(destination),
-        extracted_text=normalized,
-        status="parsed",
+        extracted_text=extracted_text,
+        status=ProtocolStatus.parsed.value,
     )
     db.add(protocol)
     db.flush()
 
-    parsed_tasks = extract_task_candidates(chunks)
-    topic_cache: dict[str, Topic] = {}
+    topic_dict = load_topics(settings.topic_dictionary_path)
+    keywords = load_task_keywords(settings.task_keywords_path)
+    extracted_tasks = extract_task_candidates(chunks, topic_dict, keywords, settings.topic_match_threshold)
 
-    for task_data in parsed_tasks:
+    topic_cache: dict[str, Topic] = {}
+    for task_data in extracted_tasks:
         topic_id = None
         topic_title = task_data.get("topic_auto_candidate")
-        conf = task_data.pop("topic_confidence", 0.0)
-        if topic_title and conf >= 0.34:
+        confidence = task_data.pop("topic_confidence", 0.0)
+        if topic_title:
             if topic_title not in topic_cache:
-                topic_obj = Topic(
+                topic = Topic(
                     protocol_id=protocol.id,
                     title=topic_title,
                     source_type="auto",
-                    confidence=conf,
-                    is_confirmed=conf > 0.66,
+                    confidence=confidence,
+                    is_confirmed=confidence > 0.66,
                     order_index=len(topic_cache),
                 )
-                db.add(topic_obj)
+                db.add(topic)
                 db.flush()
-                topic_cache[topic_title] = topic_obj
+                topic_cache[topic_title] = topic
             topic_id = topic_cache[topic_title].id
 
-        task = TaskCandidate(protocol_id=protocol.id, topic_id=topic_id, **task_data)
-        if task.deadline_raw:
-            task.deadline_iso = task.deadline_raw
-        db.add(task)
+        db.add(TaskCandidate(protocol_id=protocol.id, topic_id=topic_id, **task_data))
 
     db.commit()
-    db.refresh(protocol)
     return _get_protocol(db, protocol.id)
 
 
-@router.get("/protocols/{protocol_id}", response_model=ProtocolRead)
+@router.get("/protocols", response_model=list[ProtocolRead], tags=["protocols"])
+def list_protocols(db: Session = Depends(get_db)):
+    return db.query(Protocol).options(joinedload(Protocol.tasks), joinedload(Protocol.topics)).all()
+
+
+@router.get("/protocols/{protocol_id}", response_model=ProtocolRead, tags=["protocols"])
 def get_protocol(protocol_id: int, db: Session = Depends(get_db)):
     return _get_protocol(db, protocol_id)
 
 
-@router.patch("/tasks/{task_id}", response_model=TaskRead)
+@router.get("/protocols/{protocol_id}/draft", response_model=ProtocolRead, tags=["protocols"])
+def get_draft(protocol_id: int, db: Session = Depends(get_db)):
+    return _get_protocol(db, protocol_id)
+
+
+@router.post("/protocols/{protocol_id}/save-draft", tags=["protocols"])
+def save_draft(protocol_id: int, db: Session = Depends(get_db)):
+    protocol = _get_protocol(db, protocol_id)
+    protocol.draft_saved_at = datetime.utcnow()
+    db.add(AuditLog(protocol_id=protocol.id, entity_type="protocol", entity_id=protocol.id, action="save_draft", new_value={"draft_saved_at": protocol.draft_saved_at.isoformat()}))
+    db.commit()
+    return {"status": "saved"}
+
+
+@router.post("/protocols/{protocol_id}/validate", response_model=ValidationResponse, tags=["validator"])
+def validate_protocol(protocol_id: int, db: Session = Depends(get_db)):
+    protocol = _get_protocol(db, protocol_id)
+    duplicate_map = validate_duplicates(protocol.tasks)
+
+    details: list[ValidationTaskResult] = []
+    count_errors = 0
+    count_warnings = 0
+    count_valid = 0
+
+    for task in protocol.tasks:
+        errors, warnings = validate_task(task, settings.topic_required_as_error)
+        if task.id in duplicate_map:
+            warnings.append(duplicate_map[task.id])
+        task.errors = errors
+        task.warnings = warnings
+        task.status = TaskStatus.error.value if errors else TaskStatus.valid.value
+        count_errors += len(errors)
+        count_warnings += len(warnings)
+        if not errors:
+            count_valid += 1
+        details.append(ValidationTaskResult(task_id=task.id, errors=errors, warnings=warnings))
+
+    protocol.status = ProtocolStatus.ready_to_publish.value if count_valid else ProtocolStatus.needs_review.value
+    db.commit()
+
+    return ValidationResponse(
+        protocol_status_suggestion=protocol.status,
+        count_valid=count_valid,
+        count_warnings=count_warnings,
+        count_errors=count_errors,
+        details=details,
+    )
+
+
+@router.post("/protocols/{protocol_id}/generate-docx", tags=["exporter"])
+def generate_docx(protocol_id: int, db: Session = Depends(get_db)):
+    protocol = _get_protocol(db, protocol_id)
+    output = settings.generated_dir / f"protocol_{protocol.id}_normalized.docx"
+    export_protocol_docx(protocol, output)
+    protocol.normalized_docx_path = str(output)
+    db.commit()
+    return {"path": str(output)}
+
+
+@router.get("/protocols/{protocol_id}/download-docx", tags=["exporter"])
+def download_docx(protocol_id: int, db: Session = Depends(get_db)):
+    protocol = _get_protocol(db, protocol_id)
+    if not protocol.normalized_docx_path:
+        raise HTTPException(status_code=404, detail="Document has not been generated")
+    path = Path(protocol.normalized_docx_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Generated file is missing")
+    return FileResponse(path, filename=path.name, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+
+@router.post("/protocols/{protocol_id}/publish", response_model=PublishResponse, tags=["bitrix"])
+def publish_protocol(protocol_id: int, db: Session = Depends(get_db)):
+    protocol = _get_protocol(db, protocol_id)
+    service = _bitrix_service()
+
+    valid_tasks = [t for t in protocol.tasks if t.status == TaskStatus.valid.value and not t.errors]
+    if not valid_tasks:
+        raise HTTPException(status_code=400, detail="No valid tasks to publish")
+
+    errors: list[str] = []
+    published_tasks: list[int] = []
+    skipped_tasks: list[int] = []
+
+    smart_process_id = service.create_smart_process({"protocol_id": protocol.id, "title": protocol.original_filename})
+    protocol.bitrix_smart_process_id = smart_process_id
+
+    for task in protocol.tasks:
+        if task not in valid_tasks:
+            skipped_tasks.append(task.id)
+            continue
+        try:
+            task_id = service.create_task({"task_id": task.id, "title": task.normalized_text, "responsibleId": task.assignee_b24_id})
+            task.bitrix_task_id = task_id
+            task.status = TaskStatus.published.value
+            published_tasks.append(task.id)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"Task {task.id}: {exc}")
+
+    if protocol.normalized_docx_path:
+        protocol.published_docx_path = protocol.normalized_docx_path
+
+    if errors and published_tasks:
+        protocol.status = ProtocolStatus.partially_published.value
+    elif errors:
+        protocol.status = ProtocolStatus.publish_error.value
+    else:
+        protocol.status = ProtocolStatus.published.value
+    protocol.bitrix_publish_status = protocol.status
+
+    db.commit()
+
+    return PublishResponse(
+        protocol_id=protocol.id,
+        smart_process_id=smart_process_id,
+        published_tasks=published_tasks,
+        skipped_tasks=skipped_tasks,
+        errors=errors,
+    )
+
+
+@router.patch("/tasks/{task_id}", response_model=TaskRead, tags=["tasks"])
 def patch_task(task_id: int, payload: TaskPatch, db: Session = Depends(get_db)):
     task = db.query(TaskCandidate).filter(TaskCandidate.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-
     old = {k: getattr(task, k) for k in payload.model_dump(exclude_none=True)}
     for field, value in payload.model_dump(exclude_none=True).items():
         setattr(task, field, value)
-
     db.add(AuditLog(protocol_id=task.protocol_id, entity_type="task", entity_id=task.id, action="patch", old_value=old, new_value=payload.model_dump(exclude_none=True)))
     db.commit()
     db.refresh(task)
     return task
 
 
-@router.post("/tasks", response_model=TaskRead)
+@router.post("/tasks", response_model=TaskRead, tags=["tasks"])
 def create_task(payload: TaskCreate, db: Session = Depends(get_db)):
     task = TaskCandidate(protocol_id=payload.protocol_id, topic_id=payload.topic_id, normalized_text=payload.normalized_text, source_fragment=payload.normalized_text)
     db.add(task)
@@ -133,7 +265,7 @@ def create_task(payload: TaskCreate, db: Session = Depends(get_db)):
     return task
 
 
-@router.delete("/tasks/{task_id}")
+@router.delete("/tasks/{task_id}", tags=["tasks"])
 def delete_task(task_id: int, db: Session = Depends(get_db)):
     task = db.query(TaskCandidate).filter(TaskCandidate.id == task_id).first()
     if not task:
@@ -143,99 +275,55 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted"}
 
 
-@router.post("/tasks/{task_id}/split")
+@router.post("/tasks/{task_id}/split", tags=["tasks"])
 def split_task(task_id: int, payload: SplitPayload, db: Session = Depends(get_db)):
     task = db.query(TaskCandidate).filter(TaskCandidate.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    parts = [p.strip() for p in task.normalized_text.split(payload.separator) if p.strip()]
+    parts = [part.strip() for part in task.normalized_text.split(payload.separator) if part.strip()]
     if len(parts) < 2:
-        raise HTTPException(status_code=400, detail="Not enough parts to split")
+        raise HTTPException(status_code=400, detail="Not enough parts")
     task.normalized_text = parts[0]
     for part in parts[1:]:
-        db.add(TaskCandidate(protocol_id=task.protocol_id, topic_id=task.topic_id, normalized_text=part, source_fragment=task.source_fragment, assignee_b24_id=task.assignee_b24_id, assignee_b24_name=task.assignee_b24_name, deadline_iso=task.deadline_iso, status="draft"))
+        db.add(TaskCandidate(protocol_id=task.protocol_id, topic_id=task.topic_id, normalized_text=part, source_fragment=task.source_fragment, order_index=task.order_index))
     db.commit()
     return {"status": "split", "created": len(parts) - 1}
 
 
-@router.post("/tasks/merge", response_model=TaskRead)
+@router.post("/tasks/merge", response_model=TaskRead, tags=["tasks"])
 def merge_tasks(payload: MergePayload, db: Session = Depends(get_db)):
-    if len(payload.task_ids) < 2:
-        raise HTTPException(status_code=400, detail="Need at least 2 tasks")
     tasks = db.query(TaskCandidate).filter(TaskCandidate.id.in_(payload.task_ids)).order_by(TaskCandidate.id).all()
-    merged = tasks[0]
-    merged.normalized_text = " ; ".join(t.normalized_text for t in tasks)
-    for t in tasks[1:]:
-        db.delete(t)
+    if len(tasks) < 2:
+        raise HTTPException(status_code=400, detail="Need at least two tasks")
+    anchor = tasks[0]
+    anchor.normalized_text = " ; ".join(task.normalized_text for task in tasks)
+    for task in tasks[1:]:
+        db.delete(task)
     db.commit()
-    db.refresh(merged)
-    return merged
+    db.refresh(anchor)
+    return anchor
 
 
-@router.post("/tasks/reorder")
+@router.post("/tasks/reorder", tags=["tasks"])
 def reorder_tasks(payload: ReorderPayload, db: Session = Depends(get_db)):
     for item in payload.task_orders:
-        task = db.query(TaskCandidate).filter(TaskCandidate.id == item["id"]).first()
+        task = db.query(TaskCandidate).filter(TaskCandidate.id == item.id).first()
         if task:
-            task.order_index = item["order_index"]
+            task.order_index = item.order_index
     db.commit()
     return {"status": "ok"}
 
 
-@router.post("/tasks/move-to-topic")
+@router.post("/tasks/move-to-topic", tags=["tasks"])
 def move_tasks(payload: MoveTopicPayload, db: Session = Depends(get_db)):
     tasks = db.query(TaskCandidate).filter(TaskCandidate.id.in_(payload.task_ids)).all()
-    for t in tasks:
-        t.topic_id = payload.topic_id
+    for task in tasks:
+        task.topic_id = payload.topic_id
     db.commit()
     return {"status": "ok", "count": len(tasks)}
 
 
-@router.get("/assignees/search")
-def assignee_search(q: str = Query(default="")):
-    return [a.__dict__ for a in bitrix.search_users(q)]
-
-
-@router.post("/tasks/{task_id}/assign")
-def assign_task(task_id: int, payload: AssignPayload, db: Session = Depends(get_db)):
-    task = db.query(TaskCandidate).filter(TaskCandidate.id == task_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    task.assignee_b24_id = payload.assignee_b24_id
-    task.assignee_b24_name = payload.assignee_b24_name
-    db.commit()
-    return {"status": "ok"}
-
-
-@router.post("/tasks/bulk-assign")
-def bulk_assign(payload: BulkAssignPayload, db: Session = Depends(get_db)):
-    tasks = db.query(TaskCandidate).filter(TaskCandidate.id.in_(payload.task_ids)).all()
-    for t in tasks:
-        t.assignee_b24_id = payload.assignee_b24_id
-        t.assignee_b24_name = payload.assignee_b24_name
-    db.commit()
-    return {"status": "ok", "count": len(tasks)}
-
-
-@router.post("/tasks/bulk-topic")
-def bulk_topic(payload: BulkTopicPayload, db: Session = Depends(get_db)):
-    tasks = db.query(TaskCandidate).filter(TaskCandidate.id.in_(payload.task_ids)).all()
-    for t in tasks:
-        t.topic_id = payload.topic_id
-    db.commit()
-    return {"status": "ok", "count": len(tasks)}
-
-
-@router.post("/tasks/bulk-deadline")
-def bulk_deadline(payload: BulkDeadlinePayload, db: Session = Depends(get_db)):
-    tasks = db.query(TaskCandidate).filter(TaskCandidate.id.in_(payload.task_ids)).all()
-    for t in tasks:
-        t.deadline_iso = payload.deadline_iso
-    db.commit()
-    return {"status": "ok", "count": len(tasks)}
-
-
-@router.post("/topics", response_model=TopicRead)
+@router.post("/topics", response_model=TopicRead, tags=["topics"])
 def create_topic(payload: TopicCreate, db: Session = Depends(get_db)):
     topic = Topic(protocol_id=payload.protocol_id, title=payload.title, source_type="manual", is_confirmed=True)
     db.add(topic)
@@ -244,98 +332,38 @@ def create_topic(payload: TopicCreate, db: Session = Depends(get_db)):
     return topic
 
 
-@router.post("/protocols/{protocol_id}/save-draft")
-def save_draft(protocol_id: int, db: Session = Depends(get_db)):
-    protocol = _get_protocol(db, protocol_id)
-    protocol.draft_saved_at = datetime.utcnow()
-    protocol.status = "draft_saved"
+@router.patch("/topics/{topic_id}", response_model=TopicRead, tags=["topics"])
+def patch_topic(topic_id: int, payload: TopicPatch, db: Session = Depends(get_db)):
+    topic = db.query(Topic).filter(Topic.id == topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    for field, value in payload.model_dump(exclude_none=True).items():
+        setattr(topic, field, value)
     db.commit()
-    return {"status": "saved", "draft_saved_at": protocol.draft_saved_at}
+    db.refresh(topic)
+    return topic
 
 
-@router.get("/protocols/{protocol_id}/draft", response_model=ProtocolRead)
-def get_draft(protocol_id: int, db: Session = Depends(get_db)):
-    return _get_protocol(db, protocol_id)
-
-
-@router.post("/protocols/{protocol_id}/generate-docx")
-def generate_docx(protocol_id: int, db: Session = Depends(get_db)):
-    protocol = _get_protocol(db, protocol_id)
-    output = settings.exports_dir / f"protocol_{protocol_id}_draft.docx"
-    export_protocol_docx(protocol, output)
-    protocol.normalized_docx_path = str(output)
-    protocol.status = "docx_generated"
+@router.delete("/topics/{topic_id}", tags=["topics"])
+def delete_topic(topic_id: int, db: Session = Depends(get_db)):
+    topic = db.query(Topic).filter(Topic.id == topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    db.delete(topic)
     db.commit()
-    return {"status": "generated", "path": str(output)}
+    return {"status": "deleted"}
 
 
-@router.get("/protocols/{protocol_id}/download-docx")
-def download_docx(protocol_id: int, db: Session = Depends(get_db)):
-    protocol = _get_protocol(db, protocol_id)
-    path = protocol.normalized_docx_path or protocol.published_docx_path
-    if not path or not Path(path).exists():
-        raise HTTPException(status_code=404, detail="Document not found")
-    return FileResponse(path=path, filename=Path(path).name, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-
-
-@router.post("/protocols/{protocol_id}/validate")
-def validate_protocol(protocol_id: int, db: Session = Depends(get_db)):
-    protocol = _get_protocol(db, protocol_id)
-    require_topic = False
-    errors_count = 0
-    warnings_count = 0
-
-    dup_map = validate_duplicates(protocol.tasks)
-    for task in protocol.tasks:
-        errors, warnings = validate_task(task, require_topic=require_topic)
-        if task.id in dup_map:
-            warnings.append(dup_map[task.id])
-        task.errors = errors
-        task.warnings = warnings
-        errors_count += len(errors)
-        warnings_count += len(warnings)
-
+@router.post("/topics/bulk-assign", tags=["topics"])
+def bulk_assign(payload: BulkAssignPayload, db: Session = Depends(get_db)):
+    tasks = db.query(TaskCandidate).filter(TaskCandidate.id.in_(payload.task_ids)).all()
+    for task in tasks:
+        task.topic_id = payload.topic_id
     db.commit()
-    return {"errors": errors_count, "warnings": warnings_count}
+    return {"status": "ok", "count": len(tasks)}
 
 
-@router.post("/protocols/{protocol_id}/publish", response_model=PublishReport)
-def publish_protocol(protocol_id: int, db: Session = Depends(get_db)):
-    protocol = _get_protocol(db, protocol_id)
-
-    smart_process_id = bitrix.create_smart_process(protocol.id)
-    published_task_ids: list[int] = []
-    failed_task_ids: list[int] = []
-    errors: list[str] = []
-
-    for task in protocol.tasks:
-        task_errors, task_warnings = validate_task(task)
-        task.errors = task_errors
-        task.warnings = task_warnings
-
-        if task_errors:
-            failed_task_ids.append(task.id)
-            errors.extend([f"Task {task.id}: {e}" for e in task_errors])
-            continue
-
-        task.bitrix_task_id = bitrix.create_task(protocol.id, task.id, task.normalized_text[:50], task.assignee_b24_id or "", task.deadline_iso)
-        task.status = "published"
-        published_task_ids.append(task.id)
-
-    protocol.bitrix_smart_process_id = smart_process_id
-    protocol.bitrix_publish_status = "partial" if failed_task_ids else "success"
-    protocol.status = "published"
-
-    if protocol.normalized_docx_path:
-        published_path = settings.exports_dir / f"protocol_{protocol_id}_published.docx"
-        shutil.copy(protocol.normalized_docx_path, published_path)
-        protocol.published_docx_path = str(published_path)
-
-    db.commit()
-
-    return PublishReport(
-        smart_process_id=smart_process_id,
-        published_task_ids=published_task_ids,
-        failed_task_ids=failed_task_ids,
-        errors=errors,
-    )
+@router.get("/assignees/search", tags=["bitrix"])
+def search_assignees(q: str = Query(default="")):
+    service = _bitrix_service()
+    return [{"id": user.id, "name": user.name} for user in service.search_users(q)]

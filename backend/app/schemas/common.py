@@ -1,5 +1,7 @@
 from datetime import datetime
-from pydantic import BaseModel
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
 class TopicRead(BaseModel):
@@ -8,11 +10,10 @@ class TopicRead(BaseModel):
     title: str
     order_index: int
     source_type: str
-    confidence: float
+    confidence: float | None
     is_confirmed: bool
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class TaskRead(BaseModel):
@@ -22,20 +23,19 @@ class TaskRead(BaseModel):
     source_fragment: str
     normalized_text: str
     topic_auto_candidate: str | None
-    topic_candidate_list: list
+    topic_candidate_list: list[dict[str, Any]]
     assignee_raw: str | None
     assignee_b24_id: str | None
     assignee_b24_name: str | None
     deadline_raw: str | None
     deadline_iso: str | None
     status: str
-    warnings: list
-    errors: list
+    warnings: list[str]
+    errors: list[str]
     order_index: int
     bitrix_task_id: str | None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class ProtocolRead(BaseModel):
@@ -53,8 +53,7 @@ class ProtocolRead(BaseModel):
     topics: list[TopicRead]
     tasks: list[TaskRead]
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class TaskPatch(BaseModel):
@@ -72,27 +71,6 @@ class TaskCreate(BaseModel):
     topic_id: int | None = None
 
 
-class AssignPayload(BaseModel):
-    assignee_b24_id: str
-    assignee_b24_name: str
-
-
-class BulkAssignPayload(BaseModel):
-    task_ids: list[int]
-    assignee_b24_id: str
-    assignee_b24_name: str
-
-
-class BulkTopicPayload(BaseModel):
-    task_ids: list[int]
-    topic_id: int
-
-
-class BulkDeadlinePayload(BaseModel):
-    task_ids: list[int]
-    deadline_iso: str
-
-
 class MoveTopicPayload(BaseModel):
     task_ids: list[int]
     topic_id: int | None
@@ -102,8 +80,13 @@ class MergePayload(BaseModel):
     task_ids: list[int]
 
 
+class ReorderItem(BaseModel):
+    id: int
+    order_index: int
+
+
 class ReorderPayload(BaseModel):
-    task_orders: list[dict]
+    task_orders: list[ReorderItem]
 
 
 class SplitPayload(BaseModel):
@@ -115,8 +98,33 @@ class TopicCreate(BaseModel):
     title: str
 
 
-class PublishReport(BaseModel):
-    smart_process_id: str
-    published_task_ids: list[int]
-    failed_task_ids: list[int]
+class TopicPatch(BaseModel):
+    title: str | None = None
+    is_confirmed: bool | None = None
+
+
+class BulkAssignPayload(BaseModel):
+    topic_id: int
+    task_ids: list[int]
+
+
+class ValidationTaskResult(BaseModel):
+    task_id: int
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ValidationResponse(BaseModel):
+    protocol_status_suggestion: str
+    count_valid: int
+    count_warnings: int
+    count_errors: int
+    details: list[ValidationTaskResult]
+
+
+class PublishResponse(BaseModel):
+    protocol_id: int
+    smart_process_id: str | None
+    published_tasks: list[int]
+    skipped_tasks: list[int]
     errors: list[str]

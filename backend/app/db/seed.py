@@ -1,24 +1,35 @@
 import json
-
-from app.core.config import settings
-from app.db.session import SessionLocal
-from app.models.entities import Protocol, Topic
+from pathlib import Path
 
 
-def seed_topics() -> None:
-    db = SessionLocal()
-    try:
-        protocol = Protocol(original_filename="seed", original_file_path="seed", extracted_text="seed", status="seed")
-        db.add(protocol)
-        db.flush()
-        with open(settings.topic_dictionary_path, "r", encoding="utf-8") as f:
-            topics = json.load(f)
-        for idx, t in enumerate(topics):
-            db.add(Topic(protocol_id=protocol.id, title=t["title"], order_index=idx, source_type="auto", confidence=1.0, is_confirmed=True))
-        db.commit()
-    finally:
-        db.close()
+def ensure_seed_file(path: Path, payload: list | dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
-if __name__ == "__main__":
-    seed_topics()
+def seed_data(topics_path: Path, users_path: Path, task_keywords_path: Path) -> None:
+    ensure_seed_file(
+        topics_path,
+        [
+            {
+                "id": "topic_244",
+                "title": "Проект 244",
+                "keywords": ["244", "осаз", "хгкм", "интеграция"],
+                "synonyms": ["проект 244", "узел 244"],
+            }
+        ],
+    )
+    ensure_seed_file(
+        users_path,
+        [
+            {"id": "101", "name": "Иванов И.И."},
+            {"id": "102", "name": "Петров П.П."},
+            {"id": "103", "name": "Сидорова А.А."},
+        ],
+    )
+    ensure_seed_file(
+        task_keywords_path,
+        {"keywords": ["поручить", "подготовить", "обеспечить", "направить", "согласовать", "выполнить", "предоставить", "организовать", "рассмотреть", "доработать", "завершить", "проработать"]},
+    )
