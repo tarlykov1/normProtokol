@@ -1,13 +1,1 @@
-body { font-family: Arial, sans-serif; margin: 0; background: #f4f5f7; }
-.container { max-width: 1200px; margin: 0 auto; padding: 16px; }
-.card { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
-button { margin-right: 8px; }
-table { width: 100%; border-collapse: collapse; }
-th, td { border: 1px solid #ddd; padding: 8px; vertical-align: top; }
-.status-ok { color: green; }
-.status-warning { color: #b8860b; }
-.status-error { color: red; }
-.task-item { border: 1px solid #ddd; padding: 8px; margin-bottom: 8px; background: #fff; }
-.topic-col { flex: 1; min-width: 250px; background: #fafafa; padding: 8px; border: 1px solid #ddd; border-radius: 8px; }
-.flex { display: flex; gap: 12px; }
-input, select, textarea { width: 100%; }
+/* deprecated */
