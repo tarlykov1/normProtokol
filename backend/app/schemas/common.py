@@ -108,6 +108,16 @@ class BulkAssignPayload(BaseModel):
     task_ids: list[int]
 
 
+
+
+class BulkTaskUpdatePayload(BaseModel):
+    task_ids: list[int]
+    assignee_b24_id: str | None = None
+    assignee_b24_name: str | None = None
+    deadline_iso: str | None = None
+    status: str | None = None
+
+
 class ValidationTaskResult(BaseModel):
     task_id: int
     errors: list[str] = Field(default_factory=list)

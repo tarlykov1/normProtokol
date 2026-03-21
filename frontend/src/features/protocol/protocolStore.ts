@@ -8,6 +8,7 @@ type Filters = {
   noDeadline: boolean
   onlyErrors: boolean
   onlyUnconfirmed: boolean
+  onlyReady: boolean
   search: string
 }
 
@@ -23,14 +24,14 @@ interface ProtocolUiState {
   setFilters: (patch: Partial<Filters>) => void
 }
 
-export const useProtocolStore = create<ProtocolUiState>((set: (fn: any) => void) => ({
+export const useProtocolStore = create<ProtocolUiState>()((set) => ({
   selectedTaskIds: [],
   currentView: 'table',
-  filters: { noTopic: false, noAssignee: false, noDeadline: false, onlyErrors: false, onlyUnconfirmed: false, search: '' },
+  filters: { noTopic: false, noAssignee: false, noDeadline: false, onlyErrors: false, onlyUnconfirmed: false, onlyReady: false, search: '' },
   autosaveState: 'idle',
   setAutosaveState: (autosaveState) => set({ autosaveState }),
-  toggleTask: (id) => set((s) => ({ selectedTaskIds: s.selectedTaskIds.includes(id) ? s.selectedTaskIds.filter((x) => x !== id) : [...s.selectedTaskIds, id] })),
+  toggleTask: (id) => set((state) => ({ selectedTaskIds: state.selectedTaskIds.includes(id) ? state.selectedTaskIds.filter((taskId) => taskId !== id) : [...state.selectedTaskIds, id] })),
   clearSelection: () => set({ selectedTaskIds: [] }),
   setView: (currentView) => set({ currentView }),
-  setFilters: (patch) => set((s) => ({ filters: { ...s.filters, ...patch } }))
+  setFilters: (patch) => set((state) => ({ filters: { ...state.filters, ...patch } }))
 }))

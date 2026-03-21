@@ -14,6 +14,7 @@ from app.models.entities import AuditLog, Protocol, TaskCandidate, Topic
 from app.models.enums import ProtocolStatus, TaskStatus
 from app.schemas.common import (
     BulkAssignPayload,
+    BulkTaskUpdatePayload,
     MergePayload,
     MoveTopicPayload,
     ProtocolRead,
@@ -444,6 +445,20 @@ def delete_topic(topic_id: int, db: Session = Depends(get_db)):
     db.delete(topic)
     db.commit()
     return {"status": "deleted"}
+
+
+@router.post("/tasks/bulk-update", tags=["tasks"])
+def bulk_update_tasks(payload: BulkTaskUpdatePayload, db: Session = Depends(get_db)):
+    tasks = db.query(TaskCandidate).filter(TaskCandidate.id.in_(payload.task_ids)).all()
+    updates = payload.model_dump(exclude_none=True)
+    updates.pop("task_ids", None)
+
+    for task in tasks:
+        for field, value in updates.items():
+            setattr(task, field, value)
+
+    db.commit()
+    return {"status": "ok", "count": len(tasks)}
 
 
 @router.post("/topics/bulk-assign", tags=["topics"])
