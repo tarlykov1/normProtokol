@@ -30,6 +30,8 @@ export function NormalizePage() {
       if (filters.noAssignee && t.assignee_b24_name) return false
       if (filters.noDeadline && t.deadline_iso) return false
       if (filters.onlyErrors && !t.errors.length) return false
+      if (filters.onlyUnconfirmed && t.status !== 'needs_confirmation') return false
+      if (filters.onlyReady && t.status !== 'valid') return false
       if (filters.search && !t.normalized_text.toLowerCase().includes(filters.search.toLowerCase())) return false
       return true
     })
@@ -50,7 +52,23 @@ export function NormalizePage() {
           <button className="rounded bg-slate-900 px-3 py-1 text-sm text-white" onClick={() => navigate(`/confirm?protocolId=${data.id}`)}>К подтверждению</button>
         </div>
       </div>
-      <BulkActionsBar count={selectedTaskIds.length} topics={data.topics} onTopic={async (topicId) => { await tasksApi.bulkTopic(selectedTaskIds, topicId); clearSelection(); await refetch() }} onDelete={async () => { await Promise.all(selectedTaskIds.map((id) => tasksApi.remove(id))); clearSelection(); await refetch() }} />
+
+      <div className="flex flex-wrap gap-2 rounded border bg-white p-2 text-xs">
+        <label><input type="checkbox" checked={filters.noTopic} onChange={(e) => setFilters({ noTopic: e.target.checked })} /> Без темы</label>
+        <label><input type="checkbox" checked={filters.noAssignee} onChange={(e) => setFilters({ noAssignee: e.target.checked })} /> Без исполнителя</label>
+        <label><input type="checkbox" checked={filters.noDeadline} onChange={(e) => setFilters({ noDeadline: e.target.checked })} /> Без срока</label>
+        <label><input type="checkbox" checked={filters.onlyErrors} onChange={(e) => setFilters({ onlyErrors: e.target.checked })} /> Только ошибки</label>
+        <label><input type="checkbox" checked={filters.onlyUnconfirmed} onChange={(e) => setFilters({ onlyUnconfirmed: e.target.checked })} /> Неподтвержденные</label>
+        <label><input type="checkbox" checked={filters.onlyReady} onChange={(e) => setFilters({ onlyReady: e.target.checked })} /> Готовые к публикации</label>
+      </div>
+
+      <BulkActionsBar
+        count={selectedTaskIds.length}
+        topics={data.topics}
+        onTopic={async (topicId) => { await tasksApi.bulkTopic(selectedTaskIds, topicId); clearSelection(); await refetch() }}
+        onBulkUpdate={async (payload) => { await tasksApi.bulkUpdate({ task_ids: selectedTaskIds, ...payload }); await refetch() }}
+        onDelete={async () => { await Promise.all(selectedTaskIds.map((id) => tasksApi.remove(id))); clearSelection(); await refetch() }}
+      />
       <TasksTable tasks={filtered} topics={data.topics} selectedIds={selectedTaskIds} onToggle={toggleTask} onPatch={(id, p) => patch.mutate({ id, patch: p })} />
     </div>
   )
