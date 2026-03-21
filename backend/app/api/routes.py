@@ -63,6 +63,98 @@ def _get_protocol(db: Session, protocol_id: int) -> Protocol:
     return protocol
 
 
+
+
+@router.post("/demo/bootstrap", response_model=ProtocolRead, tags=["demo"])
+def bootstrap_demo_protocol(db: Session = Depends(get_db)):
+    protocol = Protocol(
+        original_filename="demo_protocol.docx",
+        original_file_path=str(settings.uploads_dir / "demo_protocol.docx"),
+        extracted_text="\n".join(
+            [
+                "1. Поручить Иванову И.И. подготовить коммерческое предложение до 25.03.2026",
+                "2. Петровой А.А. согласовать бюджет запуска до 28.03.2026",
+                "3. Обновить чеклист onboarding сотрудников",
+            ]
+        ),
+        status=ProtocolStatus.parsed.value,
+    )
+    db.add(protocol)
+    db.flush()
+
+    topic_sales = Topic(protocol_id=protocol.id, title="Продажи", order_index=1, source_type="auto", confidence=0.92, is_confirmed=True)
+    topic_ops = Topic(protocol_id=protocol.id, title="Операционные вопросы", order_index=2, source_type="auto", confidence=0.71, is_confirmed=False)
+    db.add_all([topic_sales, topic_ops])
+    db.flush()
+
+    db.add_all(
+        [
+            TaskCandidate(
+                protocol_id=protocol.id,
+                topic_id=topic_sales.id,
+                source_fragment="Поручить Иванову И.И. подготовить коммерческое предложение до 25.03.2026",
+                normalized_text="Подготовить коммерческое предложение для клиента Альфа",
+                topic_auto_candidate="Продажи",
+                topic_candidate_list=["Продажи", "Маркетинг"],
+                assignee_raw="Иванов И.И.",
+                assignee_b24_id="101",
+                assignee_b24_name="Иванов Илья Игоревич",
+                deadline_raw="25.03.2026",
+                deadline_iso="2026-03-25",
+                status=TaskStatus.draft.value,
+                warnings=[],
+                errors=[],
+                order_index=1,
+            ),
+            TaskCandidate(
+                protocol_id=protocol.id,
+                topic_id=topic_ops.id,
+                source_fragment="Петровой А.А. согласовать бюджет запуска до 28.03.2026",
+                normalized_text="Согласовать бюджет запуска пилотного проекта",
+                topic_auto_candidate="Операционные вопросы",
+                topic_candidate_list=["Операционные вопросы", "Финансы"],
+                assignee_raw="Петрова А.А.",
+                assignee_b24_id="102",
+                assignee_b24_name="Петрова Анна Александровна",
+                deadline_raw="28.03.2026",
+                deadline_iso="2026-03-28",
+                status=TaskStatus.draft.value,
+                warnings=[],
+                errors=[],
+                order_index=2,
+            ),
+            TaskCandidate(
+                protocol_id=protocol.id,
+                topic_id=None,
+                source_fragment="Обновить чеклист onboarding сотрудников",
+                normalized_text="Обновить чеклист onboarding для новых сотрудников",
+                topic_auto_candidate=None,
+                topic_candidate_list=["HR", "Операционные вопросы"],
+                assignee_raw=None,
+                assignee_b24_id=None,
+                assignee_b24_name=None,
+                deadline_raw=None,
+                deadline_iso=None,
+                status=TaskStatus.draft.value,
+                warnings=["Не определен исполнитель", "Не указан срок"],
+                errors=[],
+                order_index=3,
+            ),
+        ]
+    )
+
+    db.add(
+        AuditLog(
+            protocol_id=protocol.id,
+            entity_type="protocol",
+            entity_id=protocol.id,
+            action="demo_bootstrap",
+            new_value={"source": "demo"},
+        )
+    )
+    db.commit()
+    return _get_protocol(db, protocol.id)
+
 @router.post("/protocols/upload", response_model=ProtocolRead, tags=["protocols"])
 def upload_protocol(file: UploadFile = File(...), db: Session = Depends(get_db)):
     if not file.filename or not file.filename.lower().endswith(".docx"):

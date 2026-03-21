@@ -1,21 +1,16 @@
-import pytest
-
-docx = pytest.importorskip("docx")
-Document = docx.Document
+from pathlib import Path
+import base64
 
 from app.services.parser.docx_parser import extract_docx_text
 
 
-def test_extract_docx_text(tmp_path):
-    path = tmp_path / "sample.docx"
-    doc = Document()
-    doc.add_paragraph("Поручить Иванов И.И. подготовить отчет до 21.03.2026")
-    table = doc.add_table(rows=1, cols=2)
-    table.rows[0].cells[0].text = "Согласовать"
-    table.rows[0].cells[1].text = "договор"
-    doc.save(path)
+def test_extract_docx_text_from_base64_fixture(tmp_path):
+    fixture_b64 = Path(__file__).parent / "fixtures" / "sample_protocol.docx.b64"
+    docx_path = tmp_path / "sample_protocol.docx"
+    docx_path.write_bytes(base64.b64decode(fixture_b64.read_text().encode("ascii")))
 
-    text, chunks = extract_docx_text(path)
+    text, chunks = extract_docx_text(docx_path)
 
-    assert "Поручить" in text
-    assert any("Согласовать" in chunk for chunk in chunks)
+    assert "Протокол совещания" in text
+    assert any("Поручить Иванову" in chunk for chunk in chunks)
+    assert any("Организовать запуск пилота" in chunk for chunk in chunks)
