@@ -24,3 +24,14 @@ export function useMoveTask(protocolId?: number) {
   const qc = useQueryClient()
   return useMutation({ mutationFn: ({ taskId, topicId }: { taskId: number; topicId: number | null }) => tasksApi.moveToTopic([taskId], topicId), onSuccess: () => qc.invalidateQueries({ queryKey: ['protocol', protocolId] }) })
 }
+
+export function useBootstrapDemo() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: protocolsApi.demoBootstrap,
+    onSuccess: (data) => {
+      qc.setQueryData(['protocol', data.id], data)
+      qc.invalidateQueries({ queryKey: ['protocols'] })
+    }
+  })
+}

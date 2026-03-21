@@ -116,3 +116,18 @@ docker compose up --build
 - Подключить `RealBitrixService` и webhook.
 - Улучшить словари тем/синонимов и regex/эвристики.
 - Добавить workflow ролей/подписания и более глубокий audit trail.
+
+## Демо-режим для просмотра
+
+### Вариант 1 (backend + frontend)
+1. Запустите `docker compose up --build`.
+2. На странице Upload нажмите **"Открыть демо"**.
+3. Система создаст демо-протокол через `POST /api/demo/bootstrap` и откроет Normalize.
+4. Проверьте inline-редактирование, save draft, validate, generate/download docx и publish.
+
+### Вариант 2 (frontend без backend)
+```bash
+cd frontend
+VITE_USE_MOCK_API=true npm run dev
+```
+В этом режиме UI работает на `mockApi` и подходит для быстрого UX smoke-test.

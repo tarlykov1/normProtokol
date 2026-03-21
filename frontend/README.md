@@ -67,3 +67,9 @@ VITE_USE_MOCK_API=true npm run dev
 3. **Topics** — kanban-представление, DnD перенос между темами.
 4. **Confirm** — validate/generate/download/publish.
 5. **Result** — итог публикации в Bitrix24.
+
+
+## Демо режим
+- На Upload странице доступна кнопка **"Открыть демо"**.
+- При `VITE_USE_MOCK_API=false` frontend вызывает `POST /api/demo/bootstrap` и получает готовый протокол с темами/задачами для тестирования.
+- При `VITE_USE_MOCK_API=true` данные берутся из `mockApi` без backend.
