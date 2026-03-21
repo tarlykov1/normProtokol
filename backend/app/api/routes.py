@@ -13,6 +13,7 @@ from app.db.session import get_db
 from app.models.entities import AuditLog, Protocol, TaskCandidate, Topic
 from app.models.enums import ProtocolStatus, TaskStatus
 from app.schemas.common import (
+    AuditLogRead,
     BulkAssignPayload,
     BulkTaskUpdatePayload,
     MergePayload,
@@ -62,6 +63,28 @@ def _get_protocol(db: Session, protocol_id: int) -> Protocol:
     if not protocol:
         raise HTTPException(status_code=404, detail="Protocol not found")
     return protocol
+
+
+def _add_audit_log(
+    db: Session,
+    *,
+    protocol_id: int | None,
+    entity_type: str,
+    entity_id: int | None,
+    action: str,
+    old_value: dict | None = None,
+    new_value: dict | None = None,
+) -> None:
+    db.add(
+        AuditLog(
+            protocol_id=protocol_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            action=action,
+            old_value=old_value,
+            new_value=new_value,
+        )
+    )
 
 
 
@@ -144,14 +167,13 @@ def bootstrap_demo_protocol(db: Session = Depends(get_db)):
         ]
     )
 
-    db.add(
-        AuditLog(
-            protocol_id=protocol.id,
-            entity_type="protocol",
-            entity_id=protocol.id,
-            action="demo_bootstrap",
-            new_value={"source": "demo"},
-        )
+    _add_audit_log(
+        db,
+        protocol_id=protocol.id,
+        entity_type="protocol",
+        entity_id=protocol.id,
+        action="demo_bootstrap",
+        new_value={"source": "demo"},
     )
     db.commit()
     return _get_protocol(db, protocol.id)
@@ -201,6 +223,14 @@ def upload_protocol(file: UploadFile = File(...), db: Session = Depends(get_db))
 
         db.add(TaskCandidate(protocol_id=protocol.id, topic_id=topic_id, **task_data))
 
+    _add_audit_log(
+        db,
+        protocol_id=protocol.id,
+        entity_type="protocol",
+        entity_id=protocol.id,
+        action="upload",
+        new_value={"filename": file.filename, "tasks_extracted": len(extracted_tasks)},
+    )
     db.commit()
     return _get_protocol(db, protocol.id)
 
@@ -220,11 +250,29 @@ def get_draft(protocol_id: int, db: Session = Depends(get_db)):
     return _get_protocol(db, protocol_id)
 
 
+@router.get("/protocols/{protocol_id}/audit", response_model=list[AuditLogRead], tags=["audit"])
+def get_protocol_audit(protocol_id: int, db: Session = Depends(get_db)):
+    _get_protocol(db, protocol_id)
+    return (
+        db.query(AuditLog)
+        .filter(AuditLog.protocol_id == protocol_id)
+        .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+        .all()
+    )
+
+
 @router.post("/protocols/{protocol_id}/save-draft", tags=["protocols"])
 def save_draft(protocol_id: int, db: Session = Depends(get_db)):
     protocol = _get_protocol(db, protocol_id)
     protocol.draft_saved_at = datetime.utcnow()
-    db.add(AuditLog(protocol_id=protocol.id, entity_type="protocol", entity_id=protocol.id, action="save_draft", new_value={"draft_saved_at": protocol.draft_saved_at.isoformat()}))
+    _add_audit_log(
+        db,
+        protocol_id=protocol.id,
+        entity_type="protocol",
+        entity_id=protocol.id,
+        action="save_draft",
+        new_value={"draft_saved_at": protocol.draft_saved_at.isoformat()},
+    )
     db.commit()
     return {"status": "saved"}
 
@@ -253,6 +301,19 @@ def validate_protocol(protocol_id: int, db: Session = Depends(get_db)):
         details.append(ValidationTaskResult(task_id=task.id, errors=errors, warnings=warnings))
 
     protocol.status = ProtocolStatus.ready_to_publish.value if count_valid else ProtocolStatus.needs_review.value
+    _add_audit_log(
+        db,
+        protocol_id=protocol.id,
+        entity_type="protocol",
+        entity_id=protocol.id,
+        action="validate",
+        new_value={
+            "count_valid": count_valid,
+            "count_errors": count_errors,
+            "count_warnings": count_warnings,
+            "status": protocol.status,
+        },
+    )
     db.commit()
 
     return ValidationResponse(
@@ -270,6 +331,14 @@ def generate_docx(protocol_id: int, db: Session = Depends(get_db)):
     output = settings.generated_dir / f"protocol_{protocol.id}_normalized.docx"
     export_protocol_docx(protocol, output)
     protocol.normalized_docx_path = str(output)
+    _add_audit_log(
+        db,
+        protocol_id=protocol.id,
+        entity_type="protocol",
+        entity_id=protocol.id,
+        action="generate_docx",
+        new_value={"path": str(output)},
+    )
     db.commit()
     return {"path": str(output)}
 
@@ -324,6 +393,20 @@ def publish_protocol(protocol_id: int, db: Session = Depends(get_db)):
         protocol.status = ProtocolStatus.published.value
     protocol.bitrix_publish_status = protocol.status
 
+    _add_audit_log(
+        db,
+        protocol_id=protocol.id,
+        entity_type="protocol",
+        entity_id=protocol.id,
+        action="publish",
+        new_value={
+            "smart_process_id": smart_process_id,
+            "published_tasks": published_tasks,
+            "skipped_tasks": skipped_tasks,
+            "errors": errors,
+            "status": protocol.status,
+        },
+    )
     db.commit()
 
     return PublishResponse(
@@ -343,7 +426,15 @@ def patch_task(task_id: int, payload: TaskPatch, db: Session = Depends(get_db)):
     old = {k: getattr(task, k) for k in payload.model_dump(exclude_none=True)}
     for field, value in payload.model_dump(exclude_none=True).items():
         setattr(task, field, value)
-    db.add(AuditLog(protocol_id=task.protocol_id, entity_type="task", entity_id=task.id, action="patch", old_value=old, new_value=payload.model_dump(exclude_none=True)))
+    _add_audit_log(
+        db,
+        protocol_id=task.protocol_id,
+        entity_type="task",
+        entity_id=task.id,
+        action="patch",
+        old_value=old,
+        new_value=payload.model_dump(exclude_none=True),
+    )
     db.commit()
     db.refresh(task)
     return task
@@ -355,6 +446,15 @@ def create_task(payload: TaskCreate, db: Session = Depends(get_db)):
     db.add(task)
     db.commit()
     db.refresh(task)
+    _add_audit_log(
+        db,
+        protocol_id=task.protocol_id,
+        entity_type="task",
+        entity_id=task.id,
+        action="create",
+        new_value={"topic_id": task.topic_id, "normalized_text": task.normalized_text},
+    )
+    db.commit()
     return task
 
 
@@ -363,7 +463,16 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
     task = db.query(TaskCandidate).filter(TaskCandidate.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    task_snapshot = {"topic_id": task.topic_id, "normalized_text": task.normalized_text}
     db.delete(task)
+    _add_audit_log(
+        db,
+        protocol_id=task.protocol_id,
+        entity_type="task",
+        entity_id=task_id,
+        action="delete",
+        old_value=task_snapshot,
+    )
     db.commit()
     return {"status": "deleted"}
 
@@ -379,6 +488,14 @@ def split_task(task_id: int, payload: SplitPayload, db: Session = Depends(get_db
     task.normalized_text = parts[0]
     for part in parts[1:]:
         db.add(TaskCandidate(protocol_id=task.protocol_id, topic_id=task.topic_id, normalized_text=part, source_fragment=task.source_fragment, order_index=task.order_index))
+    _add_audit_log(
+        db,
+        protocol_id=task.protocol_id,
+        entity_type="task",
+        entity_id=task.id,
+        action="split",
+        new_value={"separator": payload.separator, "created_count": len(parts) - 1},
+    )
     db.commit()
     return {"status": "split", "created": len(parts) - 1}
 
@@ -392,6 +509,15 @@ def merge_tasks(payload: MergePayload, db: Session = Depends(get_db)):
     anchor.normalized_text = " ; ".join(task.normalized_text for task in tasks)
     for task in tasks[1:]:
         db.delete(task)
+    _add_audit_log(
+        db,
+        protocol_id=anchor.protocol_id,
+        entity_type="task",
+        entity_id=anchor.id,
+        action="merge",
+        old_value={"task_ids": payload.task_ids},
+        new_value={"normalized_text": anchor.normalized_text},
+    )
     db.commit()
     db.refresh(anchor)
     return anchor
@@ -399,10 +525,20 @@ def merge_tasks(payload: MergePayload, db: Session = Depends(get_db)):
 
 @router.post("/tasks/reorder", tags=["tasks"])
 def reorder_tasks(payload: ReorderPayload, db: Session = Depends(get_db)):
+    protocol_id: int | None = None
     for item in payload.task_orders:
         task = db.query(TaskCandidate).filter(TaskCandidate.id == item.id).first()
         if task:
+            protocol_id = task.protocol_id
             task.order_index = item.order_index
+    _add_audit_log(
+        db,
+        protocol_id=protocol_id,
+        entity_type="task",
+        entity_id=None,
+        action="reorder",
+        new_value={"task_orders": [item.model_dump() for item in payload.task_orders]},
+    )
     db.commit()
     return {"status": "ok"}
 
@@ -410,8 +546,17 @@ def reorder_tasks(payload: ReorderPayload, db: Session = Depends(get_db)):
 @router.post("/tasks/move-to-topic", tags=["tasks"])
 def move_tasks(payload: MoveTopicPayload, db: Session = Depends(get_db)):
     tasks = db.query(TaskCandidate).filter(TaskCandidate.id.in_(payload.task_ids)).all()
+    protocol_id = tasks[0].protocol_id if tasks else None
     for task in tasks:
         task.topic_id = payload.topic_id
+    _add_audit_log(
+        db,
+        protocol_id=protocol_id,
+        entity_type="task",
+        entity_id=None,
+        action="move_to_topic",
+        new_value={"task_ids": payload.task_ids, "topic_id": payload.topic_id},
+    )
     db.commit()
     return {"status": "ok", "count": len(tasks)}
 
@@ -422,6 +567,15 @@ def create_topic(payload: TopicCreate, db: Session = Depends(get_db)):
     db.add(topic)
     db.commit()
     db.refresh(topic)
+    _add_audit_log(
+        db,
+        protocol_id=topic.protocol_id,
+        entity_type="topic",
+        entity_id=topic.id,
+        action="create",
+        new_value={"title": topic.title},
+    )
+    db.commit()
     return topic
 
 
@@ -430,8 +584,18 @@ def patch_topic(topic_id: int, payload: TopicPatch, db: Session = Depends(get_db
     topic = db.query(Topic).filter(Topic.id == topic_id).first()
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
+    old = {k: getattr(topic, k) for k in payload.model_dump(exclude_none=True)}
     for field, value in payload.model_dump(exclude_none=True).items():
         setattr(topic, field, value)
+    _add_audit_log(
+        db,
+        protocol_id=topic.protocol_id,
+        entity_type="topic",
+        entity_id=topic.id,
+        action="patch",
+        old_value=old,
+        new_value=payload.model_dump(exclude_none=True),
+    )
     db.commit()
     db.refresh(topic)
     return topic
@@ -442,7 +606,16 @@ def delete_topic(topic_id: int, db: Session = Depends(get_db)):
     topic = db.query(Topic).filter(Topic.id == topic_id).first()
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
+    snapshot = {"title": topic.title}
     db.delete(topic)
+    _add_audit_log(
+        db,
+        protocol_id=topic.protocol_id,
+        entity_type="topic",
+        entity_id=topic_id,
+        action="delete",
+        old_value=snapshot,
+    )
     db.commit()
     return {"status": "deleted"}
 
@@ -452,11 +625,20 @@ def bulk_update_tasks(payload: BulkTaskUpdatePayload, db: Session = Depends(get_
     tasks = db.query(TaskCandidate).filter(TaskCandidate.id.in_(payload.task_ids)).all()
     updates = payload.model_dump(exclude_none=True)
     updates.pop("task_ids", None)
+    protocol_id = tasks[0].protocol_id if tasks else None
 
     for task in tasks:
         for field, value in updates.items():
             setattr(task, field, value)
 
+    _add_audit_log(
+        db,
+        protocol_id=protocol_id,
+        entity_type="task",
+        entity_id=None,
+        action="bulk_update",
+        new_value={"task_ids": payload.task_ids, "updates": updates},
+    )
     db.commit()
     return {"status": "ok", "count": len(tasks)}
 
@@ -464,8 +646,17 @@ def bulk_update_tasks(payload: BulkTaskUpdatePayload, db: Session = Depends(get_
 @router.post("/topics/bulk-assign", tags=["topics"])
 def bulk_assign(payload: BulkAssignPayload, db: Session = Depends(get_db)):
     tasks = db.query(TaskCandidate).filter(TaskCandidate.id.in_(payload.task_ids)).all()
+    protocol_id = tasks[0].protocol_id if tasks else None
     for task in tasks:
         task.topic_id = payload.topic_id
+    _add_audit_log(
+        db,
+        protocol_id=protocol_id,
+        entity_type="topic",
+        entity_id=payload.topic_id,
+        action="bulk_assign",
+        new_value={"task_ids": payload.task_ids, "topic_id": payload.topic_id},
+    )
     db.commit()
     return {"status": "ok", "count": len(tasks)}
 
