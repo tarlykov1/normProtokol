@@ -133,3 +133,7 @@ cd frontend
 VITE_USE_MOCK_API=true npm run dev
 ```
 В этом режиме UI работает на `mockApi` и подходит для быстрого UX smoke-test.
+
+## Развертывание на сервере
+
+Пошаговая инструкция для Ubuntu + Docker + Nginx + Let's Encrypt: `docs/DEPLOY_SERVER_RU.md`.
