@@ -6,7 +6,6 @@ COPY backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY backend /app/backend
-COPY backend/.env.example /app/backend/.env
 
 WORKDIR /app/backend
 

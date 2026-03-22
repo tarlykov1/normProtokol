@@ -1,139 +1,153 @@
 # NormProtokol MVP
 
-End-to-end локальный MVP для нормализации протоколов совещаний из `.docx`, редактирования задач и публикации в Bitrix24 (mock/real abstraction).
+Fullstack-проект (FastAPI + React/Vite), подготовленный для максимально простого деплоя на новом Ubuntu-сервере без ручного редактирования `docker-compose.yml` и `.env`.
 
-## 1) Архитектура
+---
 
-### Контур
-- **Frontend (React + TS + Vite)** — UI для загрузки, нормализации, board-view по темам, валидации и публикации.
-- **Backend (FastAPI + SQLAlchemy + SQLite)** — source of truth, парсинг/эвристики, сохранение draft, генерация Word, публикация в Bitrix.
-- **Storage (локальные файлы)**:
-  - `data/uploads` — исходные `.docx`
-  - `data/generated` — нормализованные документы для скачивания
-  - `data/*.json` — словари тем, ключевые слова, mock users
-- **DB (SQLite)** — протоколы, темы, задачи, audit log.
+## Быстрый запуск на новом сервере
 
-### Поток данных
-1. Upload `.docx` -> backend сохраняет файл и извлекает текст.
-2. Rule-based parser выделяет задачи-кандидаты, сроки, исполнителей, тему (best + candidates + confidence).
-3. Frontend редактирует сущности inline, autosave вызывает `save-draft`.
-4. Backend хранит состояние draft (источник истины), восстанавливает по `GET /protocols/{id}/draft`.
-5. Генерация Word: `POST /generate-docx`, скачивание `GET /download-docx`.
-6. Publish: backend вызывает mock/real Bitrix service, сохраняет IDs и статус публикации.
-
-## 2) Структура проекта
-
-```text
-project-root/
-  backend/
-    app/
-      api/
-      core/
-      db/
-      models/
-      repositories/
-      schemas/
-      services/
-        bitrix/
-        exporter/
-        normalizer/
-        parser/
-        topics/
-        validator/
-      utils/
-    alembic/
-    tests/
-      fixtures/sample_protocol.docx.b64
-    .env.example
-    requirements.txt
-    Dockerfile
-    README.md
-  frontend/
-    src/
-      app/
-      pages/
-      features/
-      shared/
-      types/
-    public/
-    .env.example
-    package.json
-    Dockerfile
-    README.md
-  data/
-    uploads/
-    generated/
-    topics.json
-    task_keywords.json
-    mock_users.json
-  docker-compose.yml
-  README.md
-```
-
-## 3) Быстрый старт (docker compose)
+### Вариант в 1 команду (если Docker уже установлен)
 
 ```bash
-docker compose up --build
+git clone <repo_url> && cd normProtokol && bash deploy.sh
 ```
 
-Открыть:
-- Frontend: `http://localhost:5173`
-- Backend OpenAPI: `http://localhost:8000/docs`
-- Health: `http://localhost:8000/health`
+### Вариант в 2 команды (рекомендуется для «чистого» сервера)
 
-## 4) Проверка сквозного сценария
-
-1. Откройте frontend.
-2. Загрузите `.docx`.
-3. Проверьте задачи на странице Normalize (текст/тема/исполнитель/срок).
-4. Нажмите Save Draft (или дождитесь autosave).
-5. Generate Word -> Download Word.
-6. Publish -> проверьте Result page (smart process id, опубликованные/пропущенные задачи).
-7. Перезагрузите страницу и откройте тот же протокол — draft и generated docx доступны повторно.
-
-## 5) API (основное)
-
-- `POST /api/protocols/upload`
-- `GET /api/protocols`
-- `GET /api/protocols/{id}`
-- `GET /api/protocols/{id}/draft`
-- `POST /api/protocols/{id}/save-draft`
-- `POST /api/protocols/{id}/validate`
-- `POST /api/protocols/{id}/generate-docx`
-- `GET /api/protocols/{id}/download-docx`
-- `POST /api/protocols/{id}/publish`
-- Tasks/Topics CRUD + split/merge/reorder/move/bulk-assign
-- `GET /api/assignees/search?q=`
-
-## 6) Ограничения MVP
-
-- Только `.docx` (без PDF/TXT пока).
-- Только rule-based parse (без LLM/ML).
-- Mock Bitrix включен по умолчанию (`BITRIX_MODE=mock`).
-
-## 7) Расширение
-
-- Подключить `RealBitrixService` и webhook.
-- Улучшить словари тем/синонимов и regex/эвристики.
-- Добавить workflow ролей/подписания и более глубокий audit trail.
-
-## Демо-режим для просмотра
-
-Быстрый вариант из репозитория: `./scripts/run_demo.sh` (поднимает стек и создает демо-протокол автоматически). Подробно: `docs/DEMO.md`.
-
-### Вариант 1 (backend + frontend)
-1. Запустите `docker compose up --build`.
-2. На странице Upload нажмите **"Открыть демо"**.
-3. Система создаст демо-протокол через `POST /api/demo/bootstrap` и откроет Normalize.
-4. Проверьте inline-редактирование, save draft, validate, generate/download docx и publish.
-
-### Вариант 2 (frontend без backend)
 ```bash
-cd frontend
-VITE_USE_MOCK_API=true npm run dev
+git clone <repo_url>
+cd normProtokol
+bash bootstrap.sh
+bash deploy.sh
 ```
-В этом режиме UI работает на `mockApi` и подходит для быстрого UX smoke-test.
 
-## Развертывание на сервере
+После запуска вы получите URL:
+- Frontend: `http://<SERVER_IP>:<FRONTEND_PORT>`
+- Backend docs: `http://<SERVER_IP>:<BACKEND_PORT>/docs`
+- Health: `http://<SERVER_IP>:<BACKEND_PORT>/health`
 
-Пошаговая инструкция для Ubuntu + Docker + Nginx + Let's Encrypt: `docs/DEPLOY_SERVER_RU.md`.
+---
+
+## Что автоматизировано
+
+`deploy.sh` автоматически:
+- определяет IP сервера (`SERVER_IP=auto`),
+- создает `backend/.env` из шаблона,
+- создает корневой `.env` для Docker Compose,
+- подставляет `CORS_ORIGINS` и `VITE_API_BASE_URL` под IP сервера,
+- создает директории `data/uploads` и `data/generated`,
+- проверяет Docker / Docker Compose,
+- проверяет RAM и свободное место,
+- проверяет занятость портов и при конфликте выбирает свободные,
+- запускает `docker compose up -d --build`,
+- выполняет post-deploy healthcheck.
+
+`bootstrap.sh` автоматически:
+- ставит `curl`, `git`, `docker.io`, `docker-compose-v2`, `ufw`,
+- включает/перезапускает сервис Docker,
+- добавляет пользователя в группу `docker`,
+- добавляет правила UFW для портов 22/15173/18000,
+- безопасен при повторном запуске (идемпотентен).
+
+---
+
+## Настройка параметров деплоя
+
+По умолчанию `deploy.sh` использует встроенные значения.
+
+Если нужна кастомизация — создайте `deploy.env`:
+
+```bash
+cp deploy.env.example deploy.env
+```
+
+Пример параметров:
+
+```env
+FRONTEND_PORT=15173
+BACKEND_PORT=18000
+APP_ENV=production
+BITRIX_MODE=mock
+SERVER_IP=auto
+VITE_USE_MOCK_API=false
+DEBUG=false
+```
+
+> Если `SERVER_IP=auto`, скрипт пытается определить внешний IP автоматически.
+
+---
+
+## Запуск по IP без домена
+
+Сценарий «из коробки» работает без DNS/домена:
+- Frontend собирается с `VITE_API_BASE_URL=http://<SERVER_IP>:<BACKEND_PORT>/api`.
+- Backend получает `CORS_ORIGINS` с frontend URL по IP.
+- Доступ к приложению сразу по адресу `http://<SERVER_IP>:<FRONTEND_PORT>`.
+
+---
+
+## Команды обслуживания
+
+```bash
+bash status.sh
+```
+Показывает:
+- статус контейнеров,
+- итоговые URL,
+- проверку доступности frontend/backend.
+
+```bash
+bash logs.sh
+bash logs.sh backend
+bash logs.sh frontend
+```
+Логи сервисов (follow-режим).
+
+```bash
+bash update.sh
+```
+Обновление проекта (`git pull --rebase`) и redeploy.
+
+```bash
+bash clean.sh
+```
+Аккуратная очистка docker build cache, dangling images и неиспользуемых volumes.
+
+---
+
+## Диагностика проблем
+
+Если `deploy.sh` сообщил ошибку:
+
+1. Проверьте контейнеры:
+   ```bash
+   docker compose ps
+   ```
+2. Посмотрите логи:
+   ```bash
+   docker compose logs --tail=200 backend frontend
+   ```
+3. Запустите интегральную проверку:
+   ```bash
+   bash status.sh
+   ```
+
+Частые причины:
+- мало RAM (особенно при сборке frontend),
+- мало свободного места,
+- заняты порты,
+- Docker установлен, но пользователь не в группе `docker` (после `bootstrap.sh` нужен повторный вход).
+
+---
+
+## Архитектура сервисов
+
+- **backend**: FastAPI (`/health`, `/docs`, `/api/*`), порт контейнера `8000`, наружу `${BACKEND_PORT}`.
+- **frontend**: React/Vite (production build + Nginx), наружу `${FRONTEND_PORT}`.
+- **data volume**: `./data` примонтирован в backend для БД/файлов.
+
+---
+
+## Разработка локально
+
+Если нужен прежний dev-сценарий — можно запускать сервисы отдельно, но для серверного окружения рекомендуется только путь через `bootstrap.sh` + `deploy.sh`.

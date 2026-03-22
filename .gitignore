@@ -3,6 +3,8 @@ __pycache__/
 .venv/
 node_modules/
 .env
+deploy.env
+backend/.env
 data/*.db
 data/uploads/*
 data/exports/*
