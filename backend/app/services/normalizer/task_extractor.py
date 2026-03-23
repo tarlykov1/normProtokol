@@ -10,6 +10,15 @@ RESOLUTION_HEADER_PATTERN = re.compile(r"^\s*решили\s*:?\s*$", re.IGNORECA
 PROJECT_HEADER_PATTERN = re.compile(r"^\s*проекты?\b[^:]*:\s*$", re.IGNORECASE)
 ASSIGNEE_LINE_PATTERN = re.compile(r"^\s*исполнитель\s*:\s*(?P<value>.+?)\s*$", re.IGNORECASE)
 DEADLINE_LINE_PATTERN = re.compile(r"^\s*срок\s*:\s*(?P<value>.+?)\s*$", re.IGNORECASE)
+LIST_PREFIX_PATTERN = re.compile(r"^\s*(?:\d+[\).:-]\s*|[-–—•]\s*)")
+
+
+def _normalize_topic_candidates(candidates: list[dict]) -> list[str]:
+    return [candidate["title"] for candidate in candidates if candidate.get("title")]
+
+
+def _clean_line_prefix(line: str) -> str:
+    return LIST_PREFIX_PATTERN.sub("", line).strip()
 
 
 def load_task_keywords(path: Path) -> list[str]:
@@ -52,7 +61,7 @@ def extract_task_candidates(
                 "source_fragment": context,
                 "normalized_text": chunk.strip(),
                 "topic_auto_candidate": match.best_candidate,
-                "topic_candidate_list": match.candidates,
+                "topic_candidate_list": _normalize_topic_candidates(match.candidates),
                 "assignee_raw": assignee_match.group(1) if assignee_match else None,
                 "deadline_raw": raw_deadline,
                 "deadline_iso": iso_deadline,
@@ -67,7 +76,7 @@ def extract_task_candidates(
 
 
 def _extract_tasks_from_resolutions(chunks: list[str], topic_dictionary: list[dict], topic_threshold: float) -> list[dict]:
-    start_idx = next((idx for idx, line in enumerate(chunks) if RESOLUTION_HEADER_PATTERN.match(line)), None)
+    start_idx = next((idx for idx, line in enumerate(chunks) if RESOLUTION_HEADER_PATTERN.search(_clean_line_prefix(line))), None)
     if start_idx is None:
         return []
 
@@ -100,9 +109,9 @@ def _extract_tasks_from_resolutions(chunks: list[str], topic_dictionary: list[di
         topic_auto_candidate = topic_match.best_candidate or current_topic_title
         topic_confidence = topic_match.confidence if topic_match.best_candidate else (1.0 if current_topic_title else 0.0)
         if topic_match.candidates:
-            topic_candidate_list = topic_match.candidates
+            topic_candidate_list = _normalize_topic_candidates(topic_match.candidates)
         elif current_topic_title:
-            topic_candidate_list = [{"title": current_topic_title, "score": 1.0}]
+            topic_candidate_list = [current_topic_title]
         else:
             topic_candidate_list = []
 
@@ -130,7 +139,7 @@ def _extract_tasks_from_resolutions(chunks: list[str], topic_dictionary: list[di
         )
 
     for idx in range(start_idx + 1, len(chunks)):
-        line = chunks[idx].strip()
+        line = _clean_line_prefix(chunks[idx])
         if not line:
             continue
 

@@ -1,6 +1,4 @@
 from datetime import datetime
-from typing import Any
-
 from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -52,7 +50,7 @@ class TaskCandidate(Base):
     source_fragment: Mapped[str] = mapped_column(Text, default="")
     normalized_text: Mapped[str] = mapped_column(Text, default="")
     topic_auto_candidate: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    topic_candidate_list: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    topic_candidate_list: Mapped[list[str] | None] = mapped_column(JSON, default=list)
     assignee_raw: Mapped[str | None] = mapped_column(String(255), nullable=True)
     assignee_b24_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     assignee_b24_name: Mapped[str | None] = mapped_column(String(255), nullable=True)

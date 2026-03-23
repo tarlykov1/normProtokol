@@ -1,7 +1,5 @@
 from datetime import datetime
-from typing import Any
-
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class TopicRead(BaseModel):
@@ -23,7 +21,7 @@ class TaskRead(BaseModel):
     source_fragment: str
     normalized_text: str
     topic_auto_candidate: str | None
-    topic_candidate_list: list[dict[str, Any]]
+    topic_candidate_list: list[str] | None
     assignee_raw: str | None
     assignee_b24_id: str | None
     assignee_b24_name: str | None
@@ -34,6 +32,21 @@ class TaskRead(BaseModel):
     errors: list[str]
     order_index: int
     bitrix_task_id: str | None
+
+    @field_validator("topic_candidate_list", mode="before")
+    @classmethod
+    def _normalize_topic_candidate_list(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, list):
+            normalized: list[str] = []
+            for item in value:
+                if isinstance(item, str):
+                    normalized.append(item)
+                elif isinstance(item, dict) and item.get("title"):
+                    normalized.append(str(item["title"]))
+            return normalized
+        return None
 
     model_config = {"from_attributes": True}
 
