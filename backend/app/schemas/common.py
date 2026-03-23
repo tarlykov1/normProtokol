@@ -138,3 +138,16 @@ class PublishResponse(BaseModel):
     published_tasks: list[int]
     skipped_tasks: list[int]
     errors: list[str]
+
+
+class AuditLogRead(BaseModel):
+    id: int
+    protocol_id: int | None
+    entity_type: str
+    entity_id: int | None
+    action: str
+    old_value: dict | None
+    new_value: dict | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
