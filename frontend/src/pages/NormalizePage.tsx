@@ -48,7 +48,7 @@ export function NormalizePage() {
         <div className="text-sm">{data.original_filename} · задач: {data.tasks.length}</div>
         <div className="flex gap-2">
           <input className="rounded border p-1 text-sm" placeholder="Поиск..." value={filters.search} onChange={(e) => setFilters({ search: e.target.value })} />
-          <button className="rounded border px-3 py-1 text-sm" onClick={() => navigate(`/topics?protocolId=${data.id}`)}>Board view</button>
+          <button className="rounded border px-3 py-1 text-sm" onClick={() => navigate(`/topics?protocolId=${data.id}`)}>Доска тем</button>
           <button className="rounded bg-slate-900 px-3 py-1 text-sm text-white" onClick={() => navigate(`/confirm?protocolId=${data.id}`)}>К подтверждению</button>
         </div>
       </div>
