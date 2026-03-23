@@ -4,14 +4,14 @@ import re
 import shutil
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.entities import AuditLog, Protocol, TaskCandidate, Topic
-from app.models.enums import ProtocolStatus, TaskStatus
+from app.models.enums import ProtocolStatus, ProtocolType, TaskStatus
 from app.schemas.common import (
     BulkAssignPayload,
     BulkTaskUpdatePayload,
@@ -19,6 +19,7 @@ from app.schemas.common import (
     MoveTopicPayload,
     ProtocolRead,
     PublishResponse,
+    SkippedTaskRead,
     ReorderPayload,
     SplitPayload,
     TaskCreate,
@@ -30,14 +31,16 @@ from app.schemas.common import (
     ValidationResponse,
     ValidationTaskResult,
 )
-from app.services.bitrix.bitrix_service import MockBitrixService, RealBitrixService
+from app.services.bitrix.bitrix_service import BitrixUnavailableError, MockBitrixService, RealBitrixService
 from app.services.exporter.docx_exporter import export_protocol_docx
-from app.services.normalizer.task_extractor import extract_task_candidates, load_task_keywords
+from app.services.normalizer.extractors import TaskExtractorRegistry
+from app.services.normalizer.task_extractor import load_task_keywords
 from app.services.parser.docx_parser import extract_docx_text
 from app.services.topics.matcher import load_topics
 from app.services.validator.task_validator import validate_duplicates, validate_task
 
 router = APIRouter(prefix="/api", tags=["protocols"])
+extractor_registry = TaskExtractorRegistry()
 
 
 def _bitrix_service():
@@ -64,6 +67,29 @@ def _get_protocol(db: Session, protocol_id: int) -> Protocol:
     return protocol
 
 
+def _build_skipped_task_detail(task: TaskCandidate, reason: str) -> SkippedTaskRead:
+    return SkippedTaskRead(
+        task_id=task.id,
+        normalized_text=task.normalized_text,
+        assignee_b24_name=task.assignee_b24_name,
+        assignee_raw=task.assignee_raw,
+        reason=reason,
+        errors=task.errors or [],
+        warnings=task.warnings or [],
+    )
+
+
+def _skip_reason_for_task(task: TaskCandidate, is_publish_failure: bool = False) -> str:
+    if task.status == TaskStatus.excluded.value:
+        return "Задача исключена из публикации"
+    if is_publish_failure:
+        return "Не удалось создать задачу в Bitrix24"
+    if task.errors:
+        assignee_errors = [item for item in task.errors if "исполн" in item.lower() or "bitrix24" in item.lower()]
+        if assignee_errors:
+            return "Не найден исполнитель в Bitrix24"
+        return "Задача не прошла валидацию"
+    return "Задача не прошла валидацию"
 
 
 @router.post("/demo/bootstrap", response_model=ProtocolRead, tags=["demo"])
@@ -78,6 +104,7 @@ def bootstrap_demo_protocol(db: Session = Depends(get_db)):
                 "3. Обновить чеклист onboarding сотрудников",
             ]
         ),
+        protocol_type=ProtocolType.standard.value,
         status=ProtocolStatus.parsed.value,
     )
     db.add(protocol)
@@ -157,9 +184,15 @@ def bootstrap_demo_protocol(db: Session = Depends(get_db)):
     return _get_protocol(db, protocol.id)
 
 @router.post("/protocols/upload", response_model=ProtocolRead, tags=["protocols"])
-def upload_protocol(file: UploadFile = File(...), db: Session = Depends(get_db)):
+def upload_protocol(
+    file: UploadFile = File(...),
+    protocol_type: str = Form(default=ProtocolType.standard.value),
+    db: Session = Depends(get_db),
+):
     if not file.filename or not file.filename.lower().endswith(".docx"):
         raise HTTPException(status_code=400, detail="Only .docx files are supported")
+
+    normalized_protocol_type = (protocol_type or ProtocolType.standard.value).strip().lower()
 
     destination = settings.uploads_dir / _safe_filename(file.filename)
     with destination.open("wb") as buffer:
@@ -170,6 +203,7 @@ def upload_protocol(file: UploadFile = File(...), db: Session = Depends(get_db))
         original_filename=file.filename,
         original_file_path=str(destination),
         extracted_text=extracted_text,
+        protocol_type=normalized_protocol_type,
         status=ProtocolStatus.parsed.value,
     )
     db.add(protocol)
@@ -177,7 +211,8 @@ def upload_protocol(file: UploadFile = File(...), db: Session = Depends(get_db))
 
     topic_dict = load_topics(settings.topic_dictionary_path)
     keywords = load_task_keywords(settings.task_keywords_path)
-    extracted_tasks = extract_task_candidates(chunks, topic_dict, keywords, settings.topic_match_threshold)
+    extractor = extractor_registry.get(normalized_protocol_type)
+    extracted_tasks = extractor.extract(chunks, topic_dict, keywords, settings.topic_match_threshold)
 
     topic_cache: dict[str, Topic] = {}
     for task_data in extracted_tasks:
@@ -233,6 +268,7 @@ def save_draft(protocol_id: int, db: Session = Depends(get_db)):
 def validate_protocol(protocol_id: int, db: Session = Depends(get_db)):
     protocol = _get_protocol(db, protocol_id)
     duplicate_map = validate_duplicates(protocol.tasks)
+    service = _bitrix_service()
 
     details: list[ValidationTaskResult] = []
     count_errors = 0
@@ -240,7 +276,7 @@ def validate_protocol(protocol_id: int, db: Session = Depends(get_db)):
     count_valid = 0
 
     for task in protocol.tasks:
-        errors, warnings = validate_task(task, settings.topic_required_as_error)
+        errors, warnings = validate_task(task, settings.topic_required_as_error, bitrix_service=service)
         if task.id in duplicate_map:
             warnings.append(duplicate_map[task.id])
         task.errors = errors
@@ -292,26 +328,57 @@ def publish_protocol(protocol_id: int, db: Session = Depends(get_db)):
 
     valid_tasks = [t for t in protocol.tasks if t.status == TaskStatus.valid.value and not t.errors]
     if not valid_tasks:
-        raise HTTPException(status_code=400, detail="No valid tasks to publish")
+        raise HTTPException(status_code=400, detail="Нет валидных задач для публикации")
 
     errors: list[str] = []
     published_tasks: list[int] = []
     skipped_tasks: list[int] = []
+    skipped_details: list[SkippedTaskRead] = []
 
-    smart_process_id = service.create_smart_process({"protocol_id": protocol.id, "title": protocol.original_filename})
-    protocol.bitrix_smart_process_id = smart_process_id
+    smart_process_id: str | None = None
+    try:
+        smart_process_id = service.create_smart_process({"protocol_id": protocol.id, "title": protocol.original_filename})
+        protocol.bitrix_smart_process_id = smart_process_id
+    except BitrixUnavailableError:
+        error_message = "Сервис Bitrix24 временно недоступен. Попробуйте позже."
+        errors.append(error_message)
+        for task in protocol.tasks:
+            skipped_tasks.append(task.id)
+            skipped_details.append(_build_skipped_task_detail(task, "Не удалось создать задачу в Bitrix24"))
+        protocol.status = ProtocolStatus.publish_error.value
+        protocol.bitrix_publish_status = protocol.status
+        db.commit()
+        return PublishResponse(
+            protocol_id=protocol.id,
+            smart_process_id=smart_process_id,
+            published_tasks=published_tasks,
+            skipped_tasks=skipped_tasks,
+            skipped_details=skipped_details,
+            errors=errors,
+        )
 
     for task in protocol.tasks:
         if task not in valid_tasks:
             skipped_tasks.append(task.id)
+            skipped_details.append(_build_skipped_task_detail(task, _skip_reason_for_task(task)))
             continue
         try:
             task_id = service.create_task({"task_id": task.id, "title": task.normalized_text, "responsibleId": task.assignee_b24_id})
             task.bitrix_task_id = task_id
             task.status = TaskStatus.published.value
             published_tasks.append(task.id)
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"Task {task.id}: {exc}")
+        except BitrixUnavailableError:
+            human_error = "Сервис Bitrix24 временно недоступен. Попробуйте позже."
+            task.errors = [*task.errors, human_error]
+            errors.append(f"Задача {task.id}: {human_error}")
+            skipped_tasks.append(task.id)
+            skipped_details.append(_build_skipped_task_detail(task, _skip_reason_for_task(task, is_publish_failure=True)))
+        except Exception:
+            human_error = "Не удалось создать задачу в Bitrix24"
+            task.errors = [*task.errors, human_error]
+            errors.append(f"Задача {task.id}: {human_error}")
+            skipped_tasks.append(task.id)
+            skipped_details.append(_build_skipped_task_detail(task, _skip_reason_for_task(task, is_publish_failure=True)))
 
     if protocol.normalized_docx_path:
         protocol.published_docx_path = protocol.normalized_docx_path
@@ -331,6 +398,7 @@ def publish_protocol(protocol_id: int, db: Session = Depends(get_db)):
         smart_process_id=smart_process_id,
         published_tasks=published_tasks,
         skipped_tasks=skipped_tasks,
+        skipped_details=skipped_details,
         errors=errors,
     )
 
@@ -473,4 +541,7 @@ def bulk_assign(payload: BulkAssignPayload, db: Session = Depends(get_db)):
 @router.get("/assignees/search", tags=["bitrix"])
 def search_assignees(q: str = Query(default="")):
     service = _bitrix_service()
-    return [{"id": user.id, "name": user.name} for user in service.search_users(q)]
+    try:
+        return [{"id": user.id, "name": user.name} for user in service.search_users(q)]
+    except BitrixUnavailableError:
+        raise HTTPException(status_code=503, detail="Сервис Bitrix24 временно недоступен") from None

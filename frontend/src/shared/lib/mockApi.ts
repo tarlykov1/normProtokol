@@ -5,7 +5,8 @@ const wait = (ms = 400) => new Promise((r) => setTimeout(r, ms))
 let protocol: Protocol = {
   id: 1,
   original_filename: 'meeting.docx',
-  status: 'draft',
+  protocol_type: 'standard',
+  status: 'parsed',
   draft_saved_at: null,
   normalized_docx_path: null,
   published_docx_path: null,
@@ -27,7 +28,36 @@ export const mockApi = {
   async getProtocol(): Promise<Protocol> { await wait(); return protocol },
   async patchTask(id: number, patch: Partial<Protocol['tasks'][number]>): Promise<void> { await wait(150); protocol = { ...protocol, tasks: protocol.tasks.map((t) => t.id === id ? { ...t, ...patch } : t) } },
   async saveDraft(): Promise<void> { await wait(200); protocol = { ...protocol, draft_saved_at: new Date().toISOString() } },
-  async validate(): Promise<ValidationSummary> { await wait(); return { protocol_status_suggestion: 'validated', count_valid: 1, count_warnings: 1, count_errors: 0, task_results: protocol.tasks.map((t) => ({ task_id: t.id, status: t.errors.length ? 'error' : t.warnings.length ? 'warning' : 'ok', errors: t.errors, warnings: t.warnings })) } },
-  async publish(): Promise<PublishResult> { await wait(); return { protocol_id: 1, smart_process_id: 'SP-777', published_tasks: [{ task_id: 11, bitrix_task_id: 'B24-1' }], skipped_tasks: [{ task_id: 12, reason: 'Missing assignee' }], errors: [] } },
+  async validate(): Promise<ValidationSummary> {
+    await wait()
+    return {
+      protocol_status_suggestion: 'ready_to_publish',
+      count_valid: 1,
+      count_warnings: 1,
+      count_errors: 0,
+      details: protocol.tasks.map((t) => ({ task_id: t.id, errors: t.errors, warnings: t.warnings }))
+    }
+  },
+  async publish(): Promise<PublishResult> {
+    await wait()
+    return {
+      protocol_id: 1,
+      smart_process_id: 'SP-777',
+      published_tasks: [11],
+      skipped_tasks: [12],
+      skipped_details: [
+        {
+          task_id: 12,
+          normalized_text: 'Обновить чеклист onboarding',
+          assignee_b24_name: null,
+          assignee_raw: null,
+          reason: 'Не найден исполнитель в Bitrix24',
+          errors: ['Исполнитель не найден в Bitrix24. Выберите другого исполнителя или отправьте заявку.'],
+          warnings: []
+        }
+      ],
+      errors: []
+    }
+  },
   async searchAssignee(q: string): Promise<Assignee[]> { await wait(100); return [{ id: '101', name: 'Иван Петров' }, { id: '102', name: 'Мария Смирнова' }].filter((x) => x.name.toLowerCase().includes(q.toLowerCase())) }
 }

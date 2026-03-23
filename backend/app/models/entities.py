@@ -3,7 +3,7 @@ from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, Stri
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
-from app.models.enums import ProtocolStatus, TaskStatus
+from app.models.enums import ProtocolStatus, ProtocolType, TaskStatus
 
 
 class Protocol(Base):
@@ -13,6 +13,7 @@ class Protocol(Base):
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     original_file_path: Mapped[str] = mapped_column(String(500), nullable=False)
     extracted_text: Mapped[str] = mapped_column(Text, default="")
+    protocol_type: Mapped[str] = mapped_column(String(30), default=ProtocolType.standard.value)
     status: Mapped[str] = mapped_column(String(50), default=ProtocolStatus.uploaded.value)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

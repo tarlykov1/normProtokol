@@ -1,6 +1,14 @@
 from enum import Enum
 
 
+class ProtocolType(str, Enum):
+    standard = "standard"
+    topics = "topics"
+    blocks = "blocks"
+    projects = "projects"
+    simple = "simple"
+
+
 class ProtocolStatus(str, Enum):
     uploaded = "uploaded"
     parsed = "parsed"

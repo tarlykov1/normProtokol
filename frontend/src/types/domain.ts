@@ -1,8 +1,21 @@
-export type ProtocolStatus = 'uploaded' | 'parsed' | 'draft' | 'validated' | 'published' | 'error'
+export type ProtocolStatus =
+  | 'uploaded'
+  | 'parsed'
+  | 'needs_review'
+  | 'ready_to_publish'
+  | 'published'
+  | 'partially_published'
+  | 'publish_error'
+
+export type ProtocolType = 'standard' | 'topics' | 'blocks' | 'projects' | 'simple'
+
+export type TaskStatus = 'draft' | 'needs_confirmation' | 'valid' | 'error' | 'excluded' | 'published'
 
 export interface Protocol {
   id: number
   original_filename: string
+  extracted_text?: string
+  protocol_type: ProtocolType
   status: ProtocolStatus
   draft_saved_at: string | null
   normalized_docx_path: string | null
@@ -36,26 +49,43 @@ export interface TaskCandidate {
   assignee_b24_name: string | null
   deadline_raw: string | null
   deadline_iso: string | null
-  status: string
+  status: TaskStatus
   warnings: string[]
   errors: string[]
   order_index: number
   bitrix_task_id: string | null
 }
 
+export interface ValidationTaskResult {
+  task_id: number
+  errors: string[]
+  warnings: string[]
+}
+
 export interface ValidationSummary {
-  protocol_status_suggestion: string
+  protocol_status_suggestion: ProtocolStatus
   count_valid: number
   count_warnings: number
   count_errors: number
-  task_results: Array<{ task_id: number; status: string; errors: string[]; warnings: string[] }>
+  details: ValidationTaskResult[]
+}
+
+export interface SkippedTaskDetail {
+  task_id: number
+  normalized_text: string
+  assignee_b24_name: string | null
+  assignee_raw: string | null
+  reason: string
+  errors: string[]
+  warnings: string[]
 }
 
 export interface PublishResult {
   protocol_id: number
-  smart_process_id: string
-  published_tasks: Array<{ task_id: number; bitrix_task_id: string }>
-  skipped_tasks: Array<{ task_id: number; reason: string }>
+  smart_process_id: string | null
+  published_tasks: number[]
+  skipped_tasks: number[]
+  skipped_details: SkippedTaskDetail[]
   errors: string[]
 }
 
