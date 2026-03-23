@@ -1,6 +1,25 @@
 import { useRef, useState } from 'react'
+import { ProtocolType } from '../../types/domain'
 
-export function UploadDropzone({ onUpload, onDemo }: { onUpload: (file: File) => void; onDemo: () => void }) {
+const protocolTypeOptions: Array<{ value: ProtocolType; label: string }> = [
+  { value: 'standard', label: 'Стандартный' },
+  { value: 'topics', label: 'По темам' },
+  { value: 'blocks', label: 'По блокам' },
+  { value: 'projects', label: 'По проектам' },
+  { value: 'simple', label: 'Простой' }
+]
+
+export function UploadDropzone({
+  onUpload,
+  onDemo,
+  protocolType,
+  onProtocolTypeChange
+}: {
+  onUpload: (file: File) => void
+  onDemo: () => void
+  protocolType: ProtocolType
+  onProtocolTypeChange: (value: ProtocolType) => void
+}) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
 
@@ -11,7 +30,17 @@ export function UploadDropzone({ onUpload, onDemo }: { onUpload: (file: File) =>
       onDragLeave={() => setDragging(false)}
       onDrop={(e) => { e.preventDefault(); setDragging(false); const file = e.dataTransfer.files[0]; if (file) onUpload(file) }}
     >
-      <p className="mb-4 text-sm">Перетащите .docx файл или выберите вручную.</p>
+      <p className="mb-2 text-sm">Перетащите .docx файл или выберите вручную.</p>
+      <div className="mx-auto mb-4 max-w-sm text-left">
+        <label className="mb-1 block text-xs text-slate-600">Тип протокола</label>
+        <select
+          className="w-full rounded border px-2 py-1 text-sm"
+          value={protocolType}
+          onChange={(e) => onProtocolTypeChange(e.target.value as ProtocolType)}
+        >
+          {protocolTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+      </div>
       <div className="flex justify-center gap-2">
         <button onClick={() => inputRef.current?.click()} className="rounded bg-slate-900 px-4 py-2 text-white">Выбрать файл</button>
         <button onClick={onDemo} className="rounded border border-slate-300 px-4 py-2 text-slate-900">Открыть демо</button>

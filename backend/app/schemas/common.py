@@ -55,6 +55,7 @@ class ProtocolRead(BaseModel):
     id: int
     original_filename: str
     extracted_text: str
+    protocol_type: str
     status: str
     created_at: datetime
     updated_at: datetime
@@ -121,8 +122,6 @@ class BulkAssignPayload(BaseModel):
     task_ids: list[int]
 
 
-
-
 class BulkTaskUpdatePayload(BaseModel):
     task_ids: list[int]
     assignee_b24_id: str | None = None
@@ -145,9 +144,20 @@ class ValidationResponse(BaseModel):
     details: list[ValidationTaskResult]
 
 
+class SkippedTaskRead(BaseModel):
+    task_id: int
+    normalized_text: str
+    assignee_b24_name: str | None
+    assignee_raw: str | None
+    reason: str
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class PublishResponse(BaseModel):
     protocol_id: int
     smart_process_id: str | None
     published_tasks: list[int]
     skipped_tasks: list[int]
+    skipped_details: list[SkippedTaskRead]
     errors: list[str]

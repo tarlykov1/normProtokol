@@ -1,13 +1,22 @@
 import json
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+
+class BitrixServiceError(Exception):
+    """Базовая ошибка Bitrix24."""
+
+
+class BitrixUnavailableError(BitrixServiceError):
+    """Сервис Bitrix24 временно недоступен."""
 
 
 @dataclass
 class Assignee:
     id: str
     name: str
+    aliases: list[str] = field(default_factory=list)
 
 
 class BaseBitrixService(ABC):
@@ -28,11 +37,24 @@ class MockBitrixService(BaseBitrixService):
     def __init__(self, users_path: Path):
         with users_path.open("r", encoding="utf-8") as f:
             users = json.load(f)
-        self._users = [Assignee(id=str(u["id"]), name=u["name"]) for u in users]
+        self._users = [
+            Assignee(
+                id=str(u["id"]),
+                name=u["name"],
+                aliases=[alias for alias in u.get("aliases", []) if isinstance(alias, str)],
+            )
+            for u in users
+        ]
 
     def search_users(self, query: str) -> list[Assignee]:
         q = query.lower().strip()
-        return [u for u in self._users if q in u.name.lower() or q in u.id]
+        if not q:
+            return self._users
+        result: list[Assignee] = []
+        for user in self._users:
+            if q in user.id or q in user.name.lower() or any(q in alias.lower() for alias in user.aliases):
+                result.append(user)
+        return result
 
     def validate_user(self, user_id: str) -> bool:
         return any(u.id == str(user_id) for u in self._users)
@@ -53,9 +75,12 @@ class RealBitrixService(BaseBitrixService):
         import httpx
 
         url = f"{self.base_url}/{self.webhook}/{method}"
-        response = httpx.post(url, json=payload, timeout=10)
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = httpx.post(url, json=payload, timeout=10)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as exc:
+            raise BitrixUnavailableError("Сервис Bitrix24 временно недоступен") from exc
 
     def search_users(self, query: str) -> list[Assignee]:
         data = self._post("user.search", {"FILTER": {"FIND": query}})

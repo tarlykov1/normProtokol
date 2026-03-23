@@ -1,14 +1,14 @@
 import { http } from './http'
 import { mockApi } from '../lib/mockApi'
-import { Protocol, PublishResult, ValidationSummary } from '../../types/domain'
+import { Protocol, ProtocolType, PublishResult, ValidationSummary } from '../../types/domain'
 
 const isMock = import.meta.env.VITE_USE_MOCK_API === 'true'
 
 export const protocolsApi = {
   list: async () => isMock ? mockApi.listProtocols() : (await http.get<Protocol[]>('/protocols')).data,
-  upload: async (file: File) => {
+  upload: async ({ file, protocolType }: { file: File; protocolType: ProtocolType }) => {
     if (isMock) return mockApi.uploadProtocol()
-    const fd = new FormData(); fd.append('file', file)
+    const fd = new FormData(); fd.append('file', file); fd.append('protocol_type', protocolType)
     return (await http.post<Protocol>('/protocols/upload', fd)).data
   },
   getById: async (id: number) => isMock ? mockApi.getProtocol() : (await http.get<Protocol>(`/protocols/${id}`)).data,

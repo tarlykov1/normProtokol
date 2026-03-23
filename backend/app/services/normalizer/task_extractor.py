@@ -177,3 +177,50 @@ def _extract_tasks_from_resolutions(chunks: list[str], topic_dictionary: list[di
 
     flush_current_task()
     return tasks
+
+
+def extract_simple_task_candidates(
+    chunks: list[str],
+    topic_dictionary: list[dict],
+    task_keywords: list[str],
+    topic_threshold: float,
+) -> list[dict]:
+    tasks = extract_task_candidates(chunks, topic_dictionary, task_keywords, topic_threshold)
+    if tasks:
+        return tasks
+
+    fallback_tasks: list[dict] = []
+    lowered_keywords = [k.lower() for k in task_keywords]
+    for idx, chunk in enumerate(chunks):
+        cleaned = _clean_line_prefix(chunk).strip()
+        if len(cleaned.split()) < 3:
+            continue
+        lowered = cleaned.lower()
+        if lowered_keywords and not any(word in lowered for word in lowered_keywords) and not LIST_PREFIX_PATTERN.match(chunk):
+            continue
+
+        assignee_match = ASSIGNEE_PATTERN.search(cleaned)
+        raw_deadline, iso_deadline = parse_deadline(cleaned)
+        warnings: list[str] = []
+        if not assignee_match:
+            warnings.append("Исполнитель не распознан автоматически")
+        if not raw_deadline:
+            warnings.append("Срок не распознан автоматически")
+
+        fallback_tasks.append(
+            {
+                "source_fragment": cleaned,
+                "normalized_text": cleaned,
+                "topic_auto_candidate": None,
+                "topic_candidate_list": [],
+                "assignee_raw": assignee_match.group(1) if assignee_match else None,
+                "deadline_raw": raw_deadline,
+                "deadline_iso": iso_deadline,
+                "status": "needs_confirmation",
+                "warnings": warnings,
+                "errors": [],
+                "order_index": idx,
+                "topic_confidence": 0.0,
+            }
+        )
+    return fallback_tasks
