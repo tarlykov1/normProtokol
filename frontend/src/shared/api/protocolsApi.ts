@@ -6,9 +6,9 @@ const isMock = import.meta.env.VITE_USE_MOCK_API === 'true'
 
 export const protocolsApi = {
   list: async () => isMock ? mockApi.listProtocols() : (await http.get<Protocol[]>('/protocols')).data,
-  upload: async ({ file, protocolType }: { file: File; protocolType: ProtocolType }) => {
+  upload: async ({ file, protocolType }: { file: File; protocolType?: ProtocolType }) => {
     if (isMock) return mockApi.uploadProtocol()
-    const fd = new FormData(); fd.append('file', file); fd.append('protocol_type', protocolType)
+    const fd = new FormData(); fd.append('file', file); fd.append('protocol_type', protocolType ?? 'auto')
     return (await http.post<Protocol>('/protocols/upload', fd)).data
   },
   getById: async (id: number) => isMock ? mockApi.getProtocol() : (await http.get<Protocol>(`/protocols/${id}`)).data,

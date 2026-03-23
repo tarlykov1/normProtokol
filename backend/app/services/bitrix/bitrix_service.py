@@ -1,4 +1,5 @@
 import json
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,6 +18,10 @@ class Assignee:
     id: str
     name: str
     aliases: list[str] = field(default_factory=list)
+
+
+def _normalize_query(value: str) -> str:
+    return " ".join(re.sub(r"[^\w\s]", " ", value.lower().replace("ё", "е")).split())
 
 
 class BaseBitrixService(ABC):
@@ -47,12 +52,14 @@ class MockBitrixService(BaseBitrixService):
         ]
 
     def search_users(self, query: str) -> list[Assignee]:
-        q = query.lower().strip()
+        q = _normalize_query(query)
         if not q:
             return self._users
         result: list[Assignee] = []
         for user in self._users:
-            if q in user.id or q in user.name.lower() or any(q in alias.lower() for alias in user.aliases):
+            aliases = [user.name, *user.aliases]
+            normalized_aliases = [_normalize_query(alias) for alias in aliases]
+            if any(q in alias or alias in q for alias in normalized_aliases):
                 result.append(user)
         return result
 

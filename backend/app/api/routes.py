@@ -33,10 +33,13 @@ from app.schemas.common import (
 )
 from app.services.bitrix.bitrix_service import BitrixUnavailableError, MockBitrixService, RealBitrixService
 from app.services.exporter.docx_exporter import export_protocol_docx
+from app.services.normalizer.document_classifier import classify_document
 from app.services.normalizer.extractors import TaskExtractorRegistry
+from app.services.normalizer.postprocess import postprocess_extracted_tasks
 from app.services.normalizer.task_extractor import load_task_keywords
 from app.services.parser.docx_parser import extract_docx_text
 from app.services.topics.matcher import load_topics
+from app.services.validator.document_validator import suggest_protocol_status
 from app.services.validator.task_validator import validate_duplicates, validate_task
 
 router = APIRouter(prefix="/api", tags=["protocols"])
@@ -186,13 +189,13 @@ def bootstrap_demo_protocol(db: Session = Depends(get_db)):
 @router.post("/protocols/upload", response_model=ProtocolRead, tags=["protocols"])
 def upload_protocol(
     file: UploadFile = File(...),
-    protocol_type: str = Form(default=ProtocolType.standard.value),
+    protocol_type: str = Form(default=ProtocolType.auto.value),
     db: Session = Depends(get_db),
 ):
     if not file.filename or not file.filename.lower().endswith(".docx"):
         raise HTTPException(status_code=400, detail="Only .docx files are supported")
 
-    normalized_protocol_type = (protocol_type or ProtocolType.standard.value).strip().lower()
+    requested_protocol_type = (protocol_type or ProtocolType.auto.value).strip().lower()
 
     destination = settings.uploads_dir / _safe_filename(file.filename)
     with destination.open("wb") as buffer:
@@ -203,7 +206,7 @@ def upload_protocol(
         original_filename=file.filename,
         original_file_path=str(destination),
         extracted_text=extracted_text,
-        protocol_type=normalized_protocol_type,
+        protocol_type=requested_protocol_type,
         status=ProtocolStatus.parsed.value,
     )
     db.add(protocol)
@@ -211,8 +214,14 @@ def upload_protocol(
 
     topic_dict = load_topics(settings.topic_dictionary_path)
     keywords = load_task_keywords(settings.task_keywords_path)
-    extractor = extractor_registry.get(normalized_protocol_type)
+    effective_protocol_type = requested_protocol_type
+    if requested_protocol_type == ProtocolType.auto.value:
+        effective_protocol_type = classify_document(chunks)
+        protocol.protocol_type = effective_protocol_type
+
+    extractor = extractor_registry.get(effective_protocol_type)
     extracted_tasks = extractor.extract(chunks, topic_dict, keywords, settings.topic_match_threshold)
+    extracted_tasks = postprocess_extracted_tasks(extracted_tasks)
 
     topic_cache: dict[str, Topic] = {}
     for task_data in extracted_tasks:
@@ -281,14 +290,14 @@ def validate_protocol(protocol_id: int, db: Session = Depends(get_db)):
             warnings.append(duplicate_map[task.id])
         task.errors = errors
         task.warnings = warnings
-        task.status = TaskStatus.error.value if errors else TaskStatus.valid.value
+        # validate_task обновляет рекомендуемый статус внутри task.status
         count_errors += len(errors)
         count_warnings += len(warnings)
-        if not errors:
+        if task.status == TaskStatus.valid.value:
             count_valid += 1
         details.append(ValidationTaskResult(task_id=task.id, errors=errors, warnings=warnings))
 
-    protocol.status = ProtocolStatus.ready_to_publish.value if count_valid else ProtocolStatus.needs_review.value
+    protocol.status = suggest_protocol_status(protocol.tasks)
     db.commit()
 
     return ValidationResponse(

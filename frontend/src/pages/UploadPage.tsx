@@ -11,7 +11,7 @@ export function UploadPage() {
   const upload = useUploadProtocol()
   const protocols = useProtocolsList()
   const bootstrapDemo = useBootstrapDemo()
-  const [protocolType, setProtocolType] = useState<ProtocolType>('standard')
+  const [protocolType, setProtocolType] = useState<ProtocolType>('auto')
 
   const onUpload = async (file: File) => {
     const protocol = await upload.mutateAsync({ file, protocolType })

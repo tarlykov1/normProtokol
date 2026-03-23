@@ -7,9 +7,24 @@ export type ProtocolStatus =
   | 'partially_published'
   | 'publish_error'
 
-export type ProtocolType = 'standard' | 'topics' | 'blocks' | 'projects' | 'simple'
+export type ProtocolType =
+  | 'auto'
+  | 'memo_meeting'
+  | 'memo_preparation'
+  | 'memo_mixed_sections'
+  | 'memo_hierarchical'
+  | 'simple'
 
-export type TaskStatus = 'draft' | 'needs_confirmation' | 'valid' | 'error' | 'excluded' | 'published'
+export type TaskStatus =
+  | 'draft'
+  | 'extracted'
+  | 'needs_review'
+  | 'needs_completion'
+  | 'needs_confirmation'
+  | 'valid'
+  | 'error'
+  | 'excluded'
+  | 'published'
 
 export interface Protocol {
   id: number
@@ -47,8 +62,16 @@ export interface TaskCandidate {
   assignee_raw: string | null
   assignee_b24_id: string | null
   assignee_b24_name: string | null
+  assignees_raw: string | null
+  assignees_normalized: string[]
   deadline_raw: string | null
   deadline_iso: string | null
+  deadline_kind: string | null
+  deadline_note: string | null
+  section_name: string | null
+  parent_context: string | null
+  context_label: string | null
+  markers: string[]
   status: TaskStatus
   warnings: string[]
   errors: string[]
