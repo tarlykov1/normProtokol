@@ -7,5 +7,11 @@ export function StatusBadge({ status }: { status: 'ok' | 'warning' | 'error' | '
     error: 'bg-red-100 text-red-700',
     draft: 'bg-slate-200 text-slate-600'
   }[status]
-  return <span className={cn('rounded px-2 py-1 text-xs font-medium', c)}>{status}</span>
+  const label = {
+    ok: 'ОК',
+    warning: 'Предупреждение',
+    error: 'Ошибка',
+    draft: 'Черновик'
+  }[status]
+  return <span className={cn('rounded px-2 py-1 text-xs font-medium', c)}>{label}</span>
 }

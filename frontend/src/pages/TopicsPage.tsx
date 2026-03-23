@@ -10,7 +10,7 @@ export function TopicsPage() {
   const move = useMoveTask(protocolId)
 
   if (isLoading) return <LoadingState />
-  if (error || !data) return <ErrorState message={(error as Error)?.message || 'Не удалось загрузить board'} />
+  if (error || !data) return <ErrorState message={(error as Error)?.message || 'Не удалось загрузить доску'} />
 
   return <TopicsBoard topics={data.topics} tasks={data.tasks} onDrop={(taskId, topicId) => move.mutate({ taskId, topicId })} />
 }
