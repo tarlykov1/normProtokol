@@ -30,7 +30,7 @@ export function NormalizePage() {
       if (filters.noAssignee && t.assignee_b24_name) return false
       if (filters.noDeadline && t.deadline_iso) return false
       if (filters.onlyErrors && !t.errors.length) return false
-      if (filters.onlyUnconfirmed && t.status !== 'needs_confirmation') return false
+      if (filters.onlyUnconfirmed && !['needs_confirmation','extracted','needs_review','needs_completion'].includes(t.status)) return false
       if (filters.onlyReady && t.status !== 'valid') return false
       if (filters.search && !t.normalized_text.toLowerCase().includes(filters.search.toLowerCase())) return false
       return true
@@ -45,7 +45,7 @@ export function NormalizePage() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between rounded border bg-white p-3">
-        <div className="text-sm">{data.original_filename} · задач: {data.tasks.length}</div>
+        <div className="text-sm">{data.original_filename} · тип: {data.protocol_type} · задач: {data.tasks.length}</div>
         <div className="flex gap-2">
           <input className="rounded border p-1 text-sm" placeholder="Поиск..." value={filters.search} onChange={(e) => setFilters({ search: e.target.value })} />
           <button className="rounded border px-3 py-1 text-sm" onClick={() => navigate(`/topics?protocolId=${data.id}`)}>Доска тем</button>

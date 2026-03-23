@@ -13,6 +13,7 @@ export function ResultPage() {
       <h2 className="text-lg font-semibold">Результат публикации</h2>
       <p className="text-sm">ID смарт-процесса: {result.smart_process_id ?? 'не создан'}</p>
       <p className="text-sm">Опубликовано: {result.published_tasks.length}, пропущено: {result.skipped_tasks.length}</p>
+      <p className="text-xs text-slate-600">Пропущенные задачи не потеряны: их можно доработать на этапе нормализации.</p>
 
       {result.skipped_details.length > 0 && (
         <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm">

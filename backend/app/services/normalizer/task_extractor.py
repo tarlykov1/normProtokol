@@ -2,15 +2,39 @@ import json
 import re
 from pathlib import Path
 
+from app.models.enums import TaskStatus
 from app.services.topics.matcher import match_topic
 from app.utils.date_parser import parse_deadline
 
-ASSIGNEE_PATTERN = re.compile(r"\b([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.[А-ЯЁ]\.)\b")
 RESOLUTION_HEADER_PATTERN = re.compile(r"^\s*решили\s*:?\s*$", re.IGNORECASE)
-PROJECT_HEADER_PATTERN = re.compile(r"^\s*проекты?\b[^:]*:\s*$", re.IGNORECASE)
-ASSIGNEE_LINE_PATTERN = re.compile(r"^\s*исполнитель\s*:\s*(?P<value>.+?)\s*$", re.IGNORECASE)
-DEADLINE_LINE_PATTERN = re.compile(r"^\s*срок\s*:\s*(?P<value>.+?)\s*$", re.IGNORECASE)
+QUESTION_TASK_SECTION_PATTERN = re.compile(r"^\s*задачи\s+по\s+вопросу\s*\d+", re.IGNORECASE)
+INFORMATIONAL_SECTION_PATTERNS = [
+    re.compile(r"^\s*отметили\s*:?\s*$", re.IGNORECASE),
+    re.compile(r"^\s*обсуждение\s+проблем\s*:?\s*$", re.IGNORECASE),
+    re.compile(r"^\s*предложения\s+по\s+улучшению\s*:?\s*$", re.IGNORECASE),
+]
+FOOTER_PATTERN = re.compile(r"^\s*мемо\s+подготовил[аиы]?\b", re.IGNORECASE)
+ASSIGNEE_LINE_PATTERN = re.compile(r"^\s*исполнител(?:ь|и)\s*:\s*(?P<value>.*)\s*$", re.IGNORECASE)
+DEADLINE_LINE_PATTERN = re.compile(r"^\s*срок\s*:\s*(?P<value>.*)\s*$", re.IGNORECASE)
+TASK_START_PATTERN = re.compile(r"^\s*(?:\d+[\).:-]\s*|[-–—•]\s+)")
 LIST_PREFIX_PATTERN = re.compile(r"^\s*(?:\d+[\).:-]\s*|[-–—•]\s*)")
+PROJECT_CONTEXT_PATTERN = re.compile(r"^\s*проекты?\b.*:\s*$", re.IGNORECASE)
+
+CONTEXT_PATTERNS = [
+    re.compile(r"^\s*кластер\b.*", re.IGNORECASE),
+    re.compile(r"^\s*тема\b.*", re.IGNORECASE),
+    re.compile(r"^\s*вопрос\s+вне\s+повестки\b.*", re.IGNORECASE),
+    re.compile(r"^\s*решение\s+по\s+итогам\s+рабочей\s+встреч\b.*", re.IGNORECASE),
+]
+NOT_REVIEWED_PATTERN = re.compile(r"^\s*не\s+рассматривали\.?\s*$", re.IGNORECASE)
+NOTE_IN_BRACKETS = re.compile(r"\((?P<note>[^)]+)\)")
+ASSIGNEE_SPLIT = re.compile(r"\s*(?:,|;|/| и )\s*")
+
+
+def load_task_keywords(path: Path) -> list[str]:
+    with path.open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return payload.get("keywords", [])
 
 
 def _normalize_topic_candidates(candidates: list[dict]) -> list[str]:
@@ -21,10 +45,147 @@ def _clean_line_prefix(line: str) -> str:
     return LIST_PREFIX_PATTERN.sub("", line).strip()
 
 
-def load_task_keywords(path: Path) -> list[str]:
-    with path.open("r", encoding="utf-8") as f:
-        payload = json.load(f)
-    return payload.get("keywords", [])
+def _parse_assignees(raw_value: str | None) -> tuple[str | None, list[str], list[str]]:
+    if raw_value is None:
+        return None, [], []
+    raw_value = raw_value.strip()
+    if not raw_value:
+        return "", [], []
+
+    notes = NOTE_IN_BRACKETS.findall(raw_value)
+    cleaned = NOTE_IN_BRACKETS.sub("", raw_value).strip()
+    parts = [part.strip() for part in ASSIGNEE_SPLIT.split(cleaned) if part.strip()]
+    return cleaned, parts, notes
+
+
+def _normalize_deadline(raw_value: str | None) -> tuple[str | None, str | None, str, str | None]:
+    if raw_value is None:
+        return None, None, "empty_deadline", None
+
+    raw = raw_value.strip()
+    if not raw:
+        return "", None, "empty_deadline", None
+
+    notes = NOTE_IN_BRACKETS.findall(raw)
+    cleaned = NOTE_IN_BRACKETS.sub("", raw).strip(" .")
+    note = "; ".join(notes) if notes else None
+
+    lowered = cleaned.lower()
+    if lowered in {"к исполнению", "исполнить", "по готовности"}:
+        return raw, None, "text_deadline", note
+
+    parsed_raw, iso = parse_deadline(cleaned)
+    if iso:
+        if re.search(r"\b\d{1,2}:\d{2}\b", cleaned):
+            return raw, iso, "exact_datetime", note
+        if note:
+            return raw, iso, "date_with_marker", note
+        return raw, iso, "exact_date", note
+
+    return raw, None, "text_deadline", note
+
+
+def _build_task(
+    *,
+    body_lines: list[str],
+    source_lines: list[str],
+    section_name: str,
+    parent_context: str | None,
+    context_label: str | None,
+    assignees_raw: str | None,
+    deadline_raw_input: str | None,
+    topic_dictionary: list[dict],
+    topic_threshold: float,
+    order_index: int,
+) -> dict | None:
+    normalized_text = " ".join(line.strip() for line in body_lines if line.strip()).strip()
+    if not normalized_text and not assignees_raw and not deadline_raw_input:
+        return None
+
+    normalized_assignees_raw, assignees, assignee_notes = _parse_assignees(assignees_raw)
+    deadline_raw, deadline_iso, deadline_kind, deadline_note = _normalize_deadline(deadline_raw_input)
+
+    markers: list[str] = []
+    warnings: list[str] = []
+    errors: list[str] = []
+
+    if context_label:
+        markers.append(context_label)
+    if assignee_notes:
+        markers.extend([f"assignee_note:{note}" for note in assignee_notes])
+    if deadline_note:
+        markers.append(f"deadline_note:{deadline_note}")
+
+    if NOT_REVIEWED_PATTERN.match(normalized_text):
+        markers.append("not_reviewed")
+        return {
+            "source_fragment": "\n".join(source_lines),
+            "normalized_text": normalized_text,
+            "section_name": section_name,
+            "parent_context": parent_context,
+            "context_label": context_label,
+            "assignee_raw": assignees[0] if assignees else None,
+            "assignees_raw": normalized_assignees_raw,
+            "assignees_normalized": assignees,
+            "deadline_raw": deadline_raw,
+            "deadline_iso": deadline_iso,
+            "deadline_kind": deadline_kind,
+            "deadline_note": deadline_note,
+            "markers": markers,
+            "topic_auto_candidate": parent_context,
+            "topic_candidate_list": [parent_context] if parent_context else [],
+            "status": TaskStatus.excluded.value,
+            "warnings": ["Пункт отмечен как «Не рассматривали». Подтвердите исключение из публикации."],
+            "errors": [],
+            "order_index": order_index,
+            "topic_confidence": 0.0,
+        }
+
+    # Topic matching fallback
+    context_for_topic = " ".join([parent_context or "", normalized_text]).strip()
+    topic_match = match_topic(context_for_topic, topic_dictionary, threshold=topic_threshold)
+    topic_auto_candidate = topic_match.best_candidate or parent_context
+    topic_candidate_list = _normalize_topic_candidates(topic_match.candidates) if topic_match.candidates else ([parent_context] if parent_context else [])
+    topic_confidence = topic_match.confidence if topic_match.best_candidate else (1.0 if parent_context else 0.0)
+
+    if len(assignees) > 1:
+        warnings.append("Задача содержит несколько исполнителей. Уточните основного ответственного для публикации.")
+    if deadline_kind == "empty_deadline":
+        errors.append("У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ.")
+    elif deadline_kind == "text_deadline":
+        warnings.append("Срок «к исполнению» не может быть опубликован как календарная дата. Уточните дату или подтвердите нефиксированный срок.")
+
+    if not normalized_text:
+        errors.append("Задача содержит только тему или контекст без действия. Доработайте формулировку поручения.")
+
+    status = TaskStatus.extracted.value
+    if errors:
+        status = TaskStatus.needs_completion.value
+    elif warnings:
+        status = TaskStatus.needs_review.value
+
+    return {
+        "source_fragment": "\n".join(source_lines),
+        "normalized_text": normalized_text,
+        "section_name": section_name,
+        "parent_context": parent_context,
+        "context_label": context_label,
+        "assignee_raw": assignees[0] if assignees else None,
+        "assignees_raw": normalized_assignees_raw,
+        "assignees_normalized": assignees,
+        "deadline_raw": deadline_raw,
+        "deadline_iso": deadline_iso,
+        "deadline_kind": deadline_kind,
+        "deadline_note": deadline_note,
+        "markers": markers,
+        "topic_auto_candidate": topic_auto_candidate,
+        "topic_candidate_list": topic_candidate_list,
+        "status": status,
+        "warnings": warnings,
+        "errors": errors,
+        "order_index": order_index,
+        "topic_confidence": topic_confidence,
+    }
 
 
 def extract_task_candidates(
@@ -33,150 +194,117 @@ def extract_task_candidates(
     task_keywords: list[str],
     topic_threshold: float,
 ) -> list[dict]:
-    resolved_tasks = _extract_tasks_from_resolutions(chunks, topic_dictionary, topic_threshold)
-    if resolved_tasks:
-        return resolved_tasks
-
     tasks: list[dict] = []
-    lowered_keywords = [k.lower() for k in task_keywords]
+    section_name = "metadata"
+    parent_context: str | None = None
+    context_label: str | None = None
 
-    for idx, chunk in enumerate(chunks):
-        lowered = chunk.lower()
-        if not any(word in lowered for word in lowered_keywords):
-            continue
-
-        context = " ".join(chunks[max(0, idx - 1): min(len(chunks), idx + 2)])
-        match = match_topic(context, topic_dictionary, threshold=topic_threshold)
-        assignee_match = ASSIGNEE_PATTERN.search(context)
-        raw_deadline, iso_deadline = parse_deadline(context)
-
-        warnings = []
-        if len(chunk.split()) < 4:
-            warnings.append("Low confidence task detection")
-        if not raw_deadline:
-            warnings.append("Deadline not recognized")
-
-        tasks.append(
-            {
-                "source_fragment": context,
-                "normalized_text": chunk.strip(),
-                "topic_auto_candidate": match.best_candidate,
-                "topic_candidate_list": _normalize_topic_candidates(match.candidates),
-                "assignee_raw": assignee_match.group(1) if assignee_match else None,
-                "deadline_raw": raw_deadline,
-                "deadline_iso": iso_deadline,
-                "status": "needs_confirmation",
-                "warnings": warnings,
-                "errors": [],
-                "order_index": idx,
-                "topic_confidence": match.confidence,
-            }
-        )
-    return tasks
-
-
-def _extract_tasks_from_resolutions(chunks: list[str], topic_dictionary: list[dict], topic_threshold: float) -> list[dict]:
-    start_idx = next((idx for idx, line in enumerate(chunks) if RESOLUTION_HEADER_PATTERN.search(_clean_line_prefix(line))), None)
-    if start_idx is None:
-        return []
-
-    tasks: list[dict] = []
-    current_topic_title: str | None = None
     current_body: list[str] = []
-    current_assignee: str | None = None
+    current_source: list[str] = []
+    current_assignees_raw: str | None = None
     current_deadline_raw: str | None = None
-    current_deadline_iso: str | None = None
-    current_start_index = start_idx + 1
+    current_order = 0
 
-    def flush_current_task() -> None:
-        nonlocal current_body, current_assignee, current_deadline_raw, current_deadline_iso, current_start_index
-        normalized_text = " ".join(part.strip() for part in current_body if part.strip()).strip()
-        if not normalized_text and not current_assignee and not current_deadline_raw:
+    def flush_current() -> None:
+        nonlocal current_body, current_source, current_assignees_raw, current_deadline_raw, current_order
+        if not current_body and current_assignees_raw is None and current_deadline_raw is None:
             return
-        context_parts = []
-        if current_topic_title:
-            context_parts.append(current_topic_title)
-        if normalized_text:
-            context_parts.append(normalized_text)
-        if current_assignee:
-            context_parts.append(f"Исполнитель: {current_assignee}")
-        if current_deadline_raw:
-            context_parts.append(f"Срок: {current_deadline_raw}")
-        source_fragment = "\n".join(context_parts)
-
-        context_for_topic = " ".join(context_parts)
-        topic_match = match_topic(context_for_topic, topic_dictionary, threshold=topic_threshold)
-        topic_auto_candidate = topic_match.best_candidate or current_topic_title
-        topic_confidence = topic_match.confidence if topic_match.best_candidate else (1.0 if current_topic_title else 0.0)
-        if topic_match.candidates:
-            topic_candidate_list = _normalize_topic_candidates(topic_match.candidates)
-        elif current_topic_title:
-            topic_candidate_list = [current_topic_title]
-        else:
-            topic_candidate_list = []
-
-        warnings: list[str] = []
-        if not current_assignee:
-            warnings.append("Assignee not recognized")
-        if not current_deadline_raw:
-            warnings.append("Deadline not recognized")
-
-        tasks.append(
-            {
-                "source_fragment": source_fragment,
-                "normalized_text": normalized_text or (current_topic_title or ""),
-                "topic_auto_candidate": topic_auto_candidate,
-                "topic_candidate_list": topic_candidate_list,
-                "assignee_raw": current_assignee,
-                "deadline_raw": current_deadline_raw,
-                "deadline_iso": current_deadline_iso,
-                "status": "needs_confirmation",
-                "warnings": warnings,
-                "errors": [],
-                "order_index": current_start_index,
-                "topic_confidence": topic_confidence,
-            }
+        task = _build_task(
+            body_lines=current_body,
+            source_lines=current_source,
+            section_name=section_name,
+            parent_context=parent_context,
+            context_label=context_label,
+            assignees_raw=current_assignees_raw,
+            deadline_raw_input=current_deadline_raw,
+            topic_dictionary=topic_dictionary,
+            topic_threshold=topic_threshold,
+            order_index=current_order,
         )
+        if task:
+            tasks.append(task)
+        current_body = []
+        current_source = []
+        current_assignees_raw = None
+        current_deadline_raw = None
 
-    for idx in range(start_idx + 1, len(chunks)):
-        line = _clean_line_prefix(chunks[idx])
-        if not line:
+    for idx, raw_line in enumerate(chunks):
+        cleaned_line = _clean_line_prefix(raw_line)
+        if not cleaned_line:
             continue
 
-        if PROJECT_HEADER_PATTERN.match(line):
-            flush_current_task()
-            current_topic_title = line.rstrip(":").strip()
-            current_body = []
-            current_assignee = None
-            current_deadline_raw = None
-            current_deadline_iso = None
-            current_start_index = idx
+        if FOOTER_PATTERN.match(cleaned_line):
+            flush_current()
+            section_name = "footer"
             continue
 
-        assignee_match = ASSIGNEE_LINE_PATTERN.match(line)
+        if RESOLUTION_HEADER_PATTERN.match(cleaned_line):
+            flush_current()
+            section_name = "task_section"
+            continue
+
+        if QUESTION_TASK_SECTION_PATTERN.match(cleaned_line):
+            flush_current()
+            section_name = "task_section"
+            parent_context = cleaned_line
+            context_label = "question_tasks"
+            continue
+
+        if any(p.match(cleaned_line) for p in INFORMATIONAL_SECTION_PATTERNS):
+            flush_current()
+            section_name = "informational"
+            continue
+
+        matched_context = next((p for p in CONTEXT_PATTERNS if p.match(cleaned_line)), None)
+        if PROJECT_CONTEXT_PATTERN.match(cleaned_line):
+            flush_current()
+            parent_context = cleaned_line.rstrip(":").strip()
+            context_label = "project_context"
+            continue
+
+        if matched_context:
+            flush_current()
+            parent_context = cleaned_line
+            if re.search(r"вне\s+повестки", cleaned_line, re.IGNORECASE):
+                context_label = "out_of_agenda"
+            elif re.search(r"решение\s+по\s+итогам", cleaned_line, re.IGNORECASE):
+                context_label = "meeting_resolution_block"
+            else:
+                context_label = "hierarchical_context"
+            continue
+
+        assignee_match = ASSIGNEE_LINE_PATTERN.match(cleaned_line)
         if assignee_match:
-            current_assignee = assignee_match.group("value").strip()
+            current_assignees_raw = assignee_match.group("value")
+            current_source.append(cleaned_line)
             continue
 
-        deadline_match = DEADLINE_LINE_PATTERN.match(line)
+        deadline_match = DEADLINE_LINE_PATTERN.match(cleaned_line)
         if deadline_match:
-            deadline_value = deadline_match.group("value").strip()
-            parsed_deadline_raw, current_deadline_iso = parse_deadline(deadline_value)
-            current_deadline_raw = parsed_deadline_raw or deadline_value
-            flush_current_task()
-            current_body = []
-            current_assignee = None
-            current_deadline_raw = None
-            current_deadline_iso = None
-            current_start_index = idx + 1
+            current_deadline_raw = deadline_match.group("value")
+            current_source.append(cleaned_line)
+            flush_current()
             continue
 
-        if current_topic_title is None:
+        if section_name in {"informational", "footer", "metadata"}:
+            # informational text is not extracted as executable tasks
             continue
-        current_body.append(line)
 
-    flush_current_task()
-    return tasks
+        if TASK_START_PATTERN.match(raw_line) and current_body:
+            flush_current()
+
+        if not current_source:
+            current_order = idx
+
+        current_body.append(cleaned_line)
+        current_source.append(cleaned_line)
+
+    flush_current()
+
+    if tasks:
+        return tasks
+
+    return extract_simple_task_candidates(chunks, topic_dictionary, task_keywords, topic_threshold)
 
 
 def extract_simple_task_candidates(
@@ -185,10 +313,6 @@ def extract_simple_task_candidates(
     task_keywords: list[str],
     topic_threshold: float,
 ) -> list[dict]:
-    tasks = extract_task_candidates(chunks, topic_dictionary, task_keywords, topic_threshold)
-    if tasks:
-        return tasks
-
     fallback_tasks: list[dict] = []
     lowered_keywords = [k.lower() for k in task_keywords]
     for idx, chunk in enumerate(chunks):
@@ -196,31 +320,21 @@ def extract_simple_task_candidates(
         if len(cleaned.split()) < 3:
             continue
         lowered = cleaned.lower()
-        if lowered_keywords and not any(word in lowered for word in lowered_keywords) and not LIST_PREFIX_PATTERN.match(chunk):
+        if lowered_keywords and not any(word in lowered for word in lowered_keywords) and not TASK_START_PATTERN.match(chunk):
             continue
 
-        assignee_match = ASSIGNEE_PATTERN.search(cleaned)
-        raw_deadline, iso_deadline = parse_deadline(cleaned)
-        warnings: list[str] = []
-        if not assignee_match:
-            warnings.append("Исполнитель не распознан автоматически")
-        if not raw_deadline:
-            warnings.append("Срок не распознан автоматически")
-
-        fallback_tasks.append(
-            {
-                "source_fragment": cleaned,
-                "normalized_text": cleaned,
-                "topic_auto_candidate": None,
-                "topic_candidate_list": [],
-                "assignee_raw": assignee_match.group(1) if assignee_match else None,
-                "deadline_raw": raw_deadline,
-                "deadline_iso": iso_deadline,
-                "status": "needs_confirmation",
-                "warnings": warnings,
-                "errors": [],
-                "order_index": idx,
-                "topic_confidence": 0.0,
-            }
+        task = _build_task(
+            body_lines=[cleaned],
+            source_lines=[cleaned],
+            section_name="task_section",
+            parent_context=None,
+            context_label=None,
+            assignees_raw=None,
+            deadline_raw_input=None,
+            topic_dictionary=topic_dictionary,
+            topic_threshold=topic_threshold,
+            order_index=idx,
         )
+        if task:
+            fallback_tasks.append(task)
     return fallback_tasks
