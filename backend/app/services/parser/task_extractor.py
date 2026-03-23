@@ -28,7 +28,7 @@ def load_topic_dictionary(path: Path | None = None) -> list[dict]:
         return json.load(f)
 
 
-def detect_topic(text: str, topic_dictionary: list[dict]) -> tuple[str | None, list[dict], float]:
+def detect_topic(text: str, topic_dictionary: list[dict]) -> tuple[str | None, list[str], float]:
     lowered = text.lower()
     scored: list[dict] = []
 
@@ -43,7 +43,7 @@ def detect_topic(text: str, topic_dictionary: list[dict]) -> tuple[str | None, l
     scored.sort(key=lambda x: x["score"], reverse=True)
     top = scored[0]
     confidence = min(1.0, top["score"] / 3)
-    return top["title"], scored[:5], confidence
+    return top["title"], [item["title"] for item in scored[:5]], confidence
 
 
 def parse_deadline(text: str) -> str | None:
