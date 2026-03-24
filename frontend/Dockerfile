@@ -1,9 +1,8 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-COPY frontend/package.json /app/package.json
-COPY frontend/package-lock.json /app/package-lock.json
-RUN npm ci
+COPY frontend/package*.json /app/
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 COPY frontend /app
 

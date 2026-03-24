@@ -2,11 +2,17 @@ from enum import Enum
 
 
 class ProtocolType(str, Enum):
+    auto = "auto"
+    memo_meeting = "memo_meeting"
+    memo_preparation = "memo_preparation"
+    memo_mixed_sections = "memo_mixed_sections"
+    memo_hierarchical = "memo_hierarchical"
+    simple = "simple"
+    # Backward-compatible aliases for previous MVP options.
     standard = "standard"
     topics = "topics"
     blocks = "blocks"
     projects = "projects"
-    simple = "simple"
 
 
 class ProtocolStatus(str, Enum):
@@ -21,8 +27,11 @@ class ProtocolStatus(str, Enum):
 
 class TaskStatus(str, Enum):
     draft = "draft"
-    needs_confirmation = "needs_confirmation"
+    extracted = "extracted"
+    needs_review = "needs_review"
+    needs_completion = "needs_completion"
     valid = "valid"
-    error = "error"
     excluded = "excluded"
     published = "published"
+    error = "error"
+    needs_confirmation = "needs_confirmation"

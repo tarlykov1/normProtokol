@@ -12,7 +12,7 @@ export function useProtocol(protocolId?: number) {
 
 export function useUploadProtocol() {
   const qc = useQueryClient()
-  return useMutation({ mutationFn: protocolsApi.upload, onSuccess: (data) => { qc.setQueryData(['protocol', data.id], data); qc.invalidateQueries({ queryKey: ['protocols'] }) } })
+  return useMutation({ mutationFn: protocolsApi.upload, onSuccess: (data) => { qc.setQueryData(['protocol', data.id], data); qc.invalidateQueries({ queryKey: ['protocols'] }); qc.invalidateQueries({ queryKey: ['protocol', data.id] }) } })
 }
 
 export function usePatchTask(protocolId?: number) {

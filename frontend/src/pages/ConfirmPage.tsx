@@ -12,32 +12,24 @@ export function ConfirmPage() {
   const [summary, setSummary] = useState<ValidationSummary | null>(null)
   const navigate = useNavigate()
 
-  const assigneeIssues = useMemo(() => {
-    if (!summary) return []
-    return summary.details.filter((item) => {
-      const combined = [...item.errors, ...item.warnings].join(' ').toLowerCase()
-      return combined.includes('исполнител') || combined.includes('bitrix24')
-    })
-  }, [summary])
+  const grouped = useMemo(() => {
+    if (!data) return { ready: 0, review: 0, completion: 0, excluded: 0 }
+    return {
+      ready: data.tasks.filter((task) => task.status === 'valid').length,
+      review: data.tasks.filter((task) => task.status === 'needs_review').length,
+      completion: data.tasks.filter((task) => task.status === 'needs_completion').length,
+      excluded: data.tasks.filter((task) => task.status === 'excluded').length
+    }
+  }, [data])
 
   if (!data) return null
 
   return (
     <div className="space-y-3 rounded border bg-white p-4">
       <h2 className="text-lg font-semibold">Подтверждение</h2>
-      <p className="text-sm">Тем: {data.topics.length}, задач: {data.tasks.length}, ошибок: {data.tasks.filter((t) => t.errors.length).length}</p>
+      <p className="text-sm">Тип документа: {data.protocol_type}</p>
+      <p className="text-sm">Готовы: {grouped.ready}, требуют проверки: {grouped.review}, требуют доработки: {grouped.completion}, исключены: {grouped.excluded}</p>
       {summary && <p className="text-sm">Валидно: {summary.count_valid}, предупреждений: {summary.count_warnings}, ошибок: {summary.count_errors}</p>}
-
-      {assigneeIssues.length > 0 && (
-        <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm">
-          <p className="mb-1 font-medium">Проблемы с исполнителями</p>
-          <ul className="list-disc space-y-1 pl-5">
-            {assigneeIssues.map((item) => (
-              <li key={item.task_id}>Задача #{item.task_id}: {[...item.errors, ...item.warnings].join('; ')}</li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       <div className="flex flex-wrap gap-2">
         <button className="rounded border px-3 py-1" onClick={() => protocolsApi.saveDraft(data.id)}>Сохранить черновик</button>
