@@ -24,6 +24,11 @@ REQUIRED_COLUMNS = {
         "deadline_kind",
         "deadline_note",
         "markers",
+        "assignees_display",
+        "coordinator",
+        "item_kind",
+        "discussed_flag",
+        "skipped_discussion_flag",
     },
 }
 
