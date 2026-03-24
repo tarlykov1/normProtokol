@@ -19,7 +19,7 @@ DEADLINE_LINE_PATTERN = re.compile(r"^\s*срок\s*:\s*(?P<value>.*)\s*$", re.I
 TASK_START_PATTERN = re.compile(r"^\s*(?:\d+(?!\.\d)[\).:-]\s*|[-–—•]\s+)")
 LIST_PREFIX_PATTERN = re.compile(r"^\s*(?:\d+(?!\.\d)[\).:-]\s*|[-–—•]\s*)")
 PROJECT_CONTEXT_PATTERN = re.compile(r"^\s*проекты?\b.*:\s*$", re.IGNORECASE)
-ROOT_NUMBERED_TASK_PATTERN = re.compile(r"^\s*(?P<num>\d+)[\).](?!\d)\s+(?P<body>.+)$")
+ROOT_NUMBERED_TASK_PATTERN = re.compile(r"^\s*(?P<num>\d+)\.(?!\d)\s*(?P<body>.+)$")
 NESTED_NUMBERED_ITEM_PATTERN = re.compile(r"^\s*(?P<num>\d+(?:\.\d+)+)\.?\s*(?P<body>.+)$")
 
 CONTEXT_PATTERNS = [
@@ -274,7 +274,13 @@ def extract_task_candidates(
             "topic_confidence": 0.0,
         }
 
-    for idx, raw_line in enumerate(chunks):
+    expanded_chunks: list[tuple[int, str]] = []
+    for idx, chunk in enumerate(chunks):
+        lines = chunk.splitlines() or [chunk]
+        for line in lines:
+            expanded_chunks.append((idx, line))
+
+    for idx, raw_line in expanded_chunks:
         stripped_line = raw_line.strip()
         cleaned_line = _clean_line_prefix(raw_line)
         if not cleaned_line:
