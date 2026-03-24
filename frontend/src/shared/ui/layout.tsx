@@ -13,9 +13,9 @@ export function AppLayout() {
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <header className="border-b bg-white">
         <PageContainer>
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-3 py-1 md:flex-row md:items-center md:justify-between">
             <Link to="/" className="text-lg font-semibold">Нормализатор протоколов</Link>
-            <nav className="flex gap-2 text-sm">
+            <nav className="flex flex-wrap gap-2 text-sm">
               {tabs.map((t) => <NavLink key={t.to} to={t.to} className={({ isActive }) => `rounded px-3 py-1 ${isActive ? 'bg-slate-900 text-white' : 'bg-slate-200'}`}>{t.label}</NavLink>)}
             </nav>
           </div>

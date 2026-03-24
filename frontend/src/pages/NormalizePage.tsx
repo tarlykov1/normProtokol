@@ -44,10 +44,10 @@ export function NormalizePage() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between rounded border bg-white p-3">
-        <div className="text-sm">{data.original_filename} · тип: {data.protocol_type} · задач: {data.tasks.length}</div>
-        <div className="flex gap-2">
-          <input className="rounded border p-1 text-sm" placeholder="Поиск..." value={filters.search} onChange={(e) => setFilters({ search: e.target.value })} />
+      <div className="flex flex-col gap-2 rounded border bg-white p-3 md:flex-row md:items-center md:justify-between">
+        <div className="text-sm break-words">{data.original_filename} · тип: {data.protocol_type} · задач: {data.tasks.length}</div>
+        <div className="flex w-full flex-wrap gap-2 md:w-auto md:flex-nowrap">
+          <input className="w-full min-w-0 rounded border p-1 text-sm md:w-72" placeholder="Поиск..." value={filters.search} onChange={(e) => setFilters({ search: e.target.value })} />
           <button className="rounded border px-3 py-1 text-sm" onClick={() => navigate(`/topics?protocolId=${data.id}`)}>Доска тем</button>
           <button className="rounded bg-slate-900 px-3 py-1 text-sm text-white" onClick={() => navigate(`/confirm?protocolId=${data.id}`)}>К подтверждению</button>
         </div>
