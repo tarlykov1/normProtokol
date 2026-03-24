@@ -147,7 +147,9 @@ log "SERVER_IP=${SERVER_IP}"
 
 FRONTEND_URL="http://${SERVER_IP}:${FRONTEND_PORT}"
 BACKEND_BASE_URL="http://${SERVER_IP}:${BACKEND_PORT}"
-VITE_API_BASE_URL="${BACKEND_BASE_URL}/api"
+# Для production через docker-compose фронтенд ходит к backend через nginx proxy /api.
+# Это устраняет зависимость от внешней доступности порта backend для браузера клиента.
+VITE_API_BASE_URL="${VITE_API_BASE_URL:-/api}"
 CORS_ORIGINS="${FRONTEND_URL},http://localhost:${FRONTEND_PORT},http://127.0.0.1:${FRONTEND_PORT}"
 
 mkdir -p data/uploads data/generated backend/data
@@ -181,9 +183,8 @@ EOF
 
 log "Сгенерированы backend/.env и .env"
 
-if [[ "${VITE_API_BASE_URL}" != "${BACKEND_BASE_URL}/api" ]]; then
-  err "Несогласованный VITE_API_BASE_URL=${VITE_API_BASE_URL} (ожидалось ${BACKEND_BASE_URL}/api)"
-  exit 1
+if [[ "${VITE_API_BASE_URL}" != "/api" ]]; then
+  warn "VITE_API_BASE_URL=${VITE_API_BASE_URL}. Рекомендуется /api для работы через nginx proxy."
 fi
 
 log "Запускаю docker compose up -d --build ..."
