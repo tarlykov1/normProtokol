@@ -4,8 +4,11 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: protocol-normalizer-backend
+    command: sh -c "python -m scripts.db_prepare && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     env_file:
       - backend/.env
+    environment:
+      PYTHONPATH: /app/backend
     ports:
       - "${BACKEND_PORT:-18000}:8000"
     volumes:

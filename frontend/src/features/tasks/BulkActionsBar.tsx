@@ -18,13 +18,13 @@ export function BulkActionsBar({ count, topics, onTopic, onDelete, onBulkUpdate 
   return (
     <div className="sticky top-0 z-10 mb-2 flex flex-wrap items-center gap-2 rounded border bg-white p-2 text-sm">
       <span>Выбрано: {count}</span>
-      <select className="rounded border p-1" onChange={(e) => onTopic(e.target.value ? Number(e.target.value) : null)}>
+      <select className="w-full rounded border p-1 sm:w-auto" onChange={(e) => onTopic(e.target.value ? Number(e.target.value) : null)}>
         <option value="">Назначить тему</option>
         {topics.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
       </select>
 
       <input
-        className="rounded border p-1"
+        className="w-full rounded border p-1 sm:w-64"
         placeholder="Массово: исполнитель"
         value={assignee}
         onChange={(e) => setAssignee(e.target.value)}
@@ -36,7 +36,7 @@ export function BulkActionsBar({ count, topics, onTopic, onDelete, onBulkUpdate 
         Применить исполнителя
       </button>
 
-      <input type="date" className="rounded border p-1" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+      <input type="date" className="w-full rounded border p-1 sm:w-auto" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
       <button
         onClick={() => onBulkUpdate({ deadline_iso: deadline || null })}
         className="rounded border px-2 py-1"

@@ -1,5 +1,6 @@
 import { TaskCandidate, Topic } from '../../types/domain'
 import { StatusBadge } from '../../shared/ui/StatusBadge'
+import { cn } from '../../shared/lib/cn'
 
 interface Props {
   task: TaskCandidate
@@ -22,6 +23,18 @@ export function TaskRow({ task, topics, selected, onToggle, onPatch }: Props) {
     const lowered = item.toLowerCase()
     return lowered.includes('исполнител') || lowered.includes('bitrix24')
   })
+  const allMessages = [...errors, ...warnings]
+
+  const toneClass = (message: string) => {
+    const m = message.toLowerCase()
+    const isError = /(ошиб|не найден|invalid|failed|cannot|некоррект|невозможно)/.test(m)
+    if (isError) return 'text-red-700'
+
+    const isPositive = /(найден|успеш|подтвержден|валид|ok|готов)/.test(m)
+    if (isPositive) return 'text-green-700'
+
+    return 'text-orange-600'
+  }
 
   return (
     <tr className="border-b bg-white text-sm align-top">
@@ -44,8 +57,12 @@ export function TaskRow({ task, topics, selected, onToggle, onPatch }: Props) {
       </td>
       <td className="p-2">
         <input className="w-full rounded border p-1" value={task.assignee_b24_name ?? task.assignee_raw ?? ''} onChange={(e) => onPatch(task.id, { assignee_b24_name: e.target.value })} />
-        {assignees.length > 1 && <p className="mt-1 text-xs text-amber-700">Найдено несколько исполнителей: {assignees.join(', ')}</p>}
-        {assigneeHints.length > 0 && <p className="mt-1 text-xs text-red-600">{assigneeHints.join('; ')}</p>}
+        {assignees.length > 1 && <p className="mt-1 text-xs text-orange-600">Найдено несколько исполнителей: {assignees.join(', ')}</p>}
+        {assigneeHints.length > 0 && (
+          <div className="mt-1 space-y-0.5 text-xs">
+            {assigneeHints.map((hint, index) => <p key={`${task.id}-assignee-hint-${index}`} className={toneClass(hint)}>{hint}</p>)}
+          </div>
+        )}
       </td>
       <td className="p-2">
         <input type="date" className="w-full rounded border p-1" value={task.deadline_iso ?? ''} onChange={(e) => onPatch(task.id, { deadline_iso: e.target.value || null })} />
@@ -53,10 +70,9 @@ export function TaskRow({ task, topics, selected, onToggle, onPatch }: Props) {
       </td>
       <td className="p-2">
         <StatusBadge status={status} />
-        {(errors.length > 0 || warnings.length > 0) && (
+        {allMessages.length > 0 && (
           <div className="mt-1 space-y-1 text-xs">
-            {errors.map((error, index) => <p key={`e-${index}`} className="text-red-700">• {error}</p>)}
-            {warnings.map((warning, index) => <p key={`w-${index}`} className="text-amber-700">• {warning}</p>)}
+            {allMessages.map((message, index) => <p key={`m-${index}`} className={cn(toneClass(message))}>• {message}</p>)}
           </div>
         )}
       </td>
