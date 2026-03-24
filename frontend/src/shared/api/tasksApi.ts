@@ -9,7 +9,7 @@ export const tasksApi = {
   moveToTopic: async (taskIds: number[], topic_id: number | null) => { await http.post('/tasks/move-to-topic', { task_ids: taskIds, topic_id }) },
   reorder: async (taskOrders: Array<{ task_id: number; order_index: number }>) => { await http.post('/tasks/reorder', { task_orders: taskOrders }) },
   bulkTopic: async (taskIds: number[], topic_id: number | null) => { await http.post('/topics/bulk-assign', { task_ids: taskIds, topic_id }) },
-  bulkUpdate: async (payload: { task_ids: number[]; assignee_b24_name?: string | null; assignee_b24_id?: string | null; deadline_iso?: string | null; status?: string }) => {
+  bulkUpdate: async (payload: { task_ids: number[]; assignee_b24_name?: string | null; assignee_b24_id?: string | null; deadline_iso?: string | null; coordinator?: string | null; status?: string }) => {
     await http.post('/tasks/bulk-update', payload)
   }
 }
