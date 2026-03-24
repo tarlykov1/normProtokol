@@ -12,9 +12,9 @@ interface Props {
 export function TasksTable({ tasks, topics, selectedIds, onToggle, onPatch }: Props) {
   return (
     <div className="overflow-x-auto rounded border">
-      <table className="min-w-[980px] md:min-w-full">
+      <table className="min-w-[920px] md:min-w-full">
         <thead className="bg-slate-100 text-left text-xs uppercase">
-          <tr><th className="p-2"/><th className="p-2">Тема и контекст</th><th className="p-2">Задача</th><th className="p-2">Исполнитель</th><th className="p-2">Срок</th><th className="p-2">Статус/причины</th><th className="p-2">Фрагмент</th></tr>
+          <tr><th className="p-2"/><th className="p-2">Тема / статус</th><th className="p-2">Задача</th><th className="p-2">Срок / исполнители / координатор</th></tr>
         </thead>
         <tbody>{tasks.map((task) => <TaskRow key={task.id} task={task} topics={topics} selected={selectedIds.includes(task.id)} onToggle={() => onToggle(task.id)} onPatch={onPatch} />)}</tbody>
       </table>

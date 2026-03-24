@@ -64,6 +64,8 @@ export interface TaskCandidate {
   assignee_b24_name: string | null
   assignees_raw: string | null
   assignees_normalized: string[]
+  assignees_display: string | null
+  coordinator: string | null
   deadline_raw: string | null
   deadline_iso: string | null
   deadline_kind: string | null
@@ -71,6 +73,9 @@ export interface TaskCandidate {
   section_name: string | null
   parent_context: string | null
   context_label: string | null
+  item_kind: 'agenda' | 'discussion' | 'task' | 'skipped_agenda'
+  discussed_flag: boolean
+  skipped_discussion_flag: boolean
   markers: string[]
   status: TaskStatus
   warnings: string[]

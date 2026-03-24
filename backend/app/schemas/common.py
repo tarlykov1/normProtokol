@@ -37,9 +37,14 @@ class TaskRead(BaseModel):
     context_label: str | None = None
     assignees_raw: str | None = None
     assignees_normalized: list[str] = Field(default_factory=list)
+    assignees_display: str | None = None
+    coordinator: str | None = None
     deadline_kind: str | None = None
     deadline_note: str | None = None
     markers: list[str] = Field(default_factory=list)
+    item_kind: str = "task"
+    discussed_flag: bool = True
+    skipped_discussion_flag: bool = False
 
     @field_validator("topic_candidate_list", mode="before")
     @classmethod
@@ -86,6 +91,8 @@ class TaskPatch(BaseModel):
     deadline_iso: str | None = None
     status: str | None = None
     assignees_normalized: list[str] | None = None
+    assignees_display: str | None = None
+    coordinator: str | None = None
     deadline_kind: str | None = None
     deadline_note: str | None = None
 
@@ -140,6 +147,8 @@ class BulkTaskUpdatePayload(BaseModel):
     deadline_iso: str | None = None
     status: str | None = None
     assignees_normalized: list[str] | None = None
+    assignees_display: str | None = None
+    coordinator: str | None = None
     deadline_kind: str | None = None
     deadline_note: str | None = None
 

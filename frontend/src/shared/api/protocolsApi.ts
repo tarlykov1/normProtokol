@@ -5,13 +5,20 @@ import { Protocol, ProtocolType, PublishResult, TaskCandidate, ValidationSummary
 const isMock = import.meta.env.VITE_USE_MOCK_API === 'true'
 
 function normalizeTask(task: TaskCandidate): TaskCandidate {
+  const assignees = task.assignees_normalized ?? []
+  const assigneesDisplay = task.assignees_display ?? (assignees.length ? assignees.join(', ') : task.assignee_b24_name ?? task.assignee_raw ?? null)
   return {
     ...task,
     warnings: task.warnings ?? [],
     errors: task.errors ?? [],
     markers: task.markers ?? [],
-    assignees_normalized: task.assignees_normalized ?? [],
-    topic_candidate_list: task.topic_candidate_list ?? []
+    assignees_normalized: assignees,
+    assignees_display: assigneesDisplay,
+    coordinator: task.coordinator ?? null,
+    topic_candidate_list: task.topic_candidate_list ?? [],
+    item_kind: task.item_kind ?? 'task',
+    discussed_flag: task.discussed_flag ?? true,
+    skipped_discussion_flag: task.skipped_discussion_flag ?? false
   }
 }
 
