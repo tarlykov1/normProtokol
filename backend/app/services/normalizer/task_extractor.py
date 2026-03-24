@@ -16,9 +16,11 @@ INFORMATIONAL_SECTION_PATTERNS = [
 FOOTER_PATTERN = re.compile(r"^\s*мемо\s+подготовил[аиы]?\b", re.IGNORECASE)
 ASSIGNEE_LINE_PATTERN = re.compile(r"^\s*исполнител(?:ь|и)\s*:\s*(?P<value>.*)\s*$", re.IGNORECASE)
 DEADLINE_LINE_PATTERN = re.compile(r"^\s*срок\s*:\s*(?P<value>.*)\s*$", re.IGNORECASE)
-TASK_START_PATTERN = re.compile(r"^\s*(?:\d+[\).:-]\s*|[-–—•]\s+)")
-LIST_PREFIX_PATTERN = re.compile(r"^\s*(?:\d+[\).:-]\s*|[-–—•]\s*)")
+TASK_START_PATTERN = re.compile(r"^\s*(?:\d+(?!\.\d)[\).:-]\s*|[-–—•]\s+)")
+LIST_PREFIX_PATTERN = re.compile(r"^\s*(?:\d+(?!\.\d)[\).:-]\s*|[-–—•]\s*)")
 PROJECT_CONTEXT_PATTERN = re.compile(r"^\s*проекты?\b.*:\s*$", re.IGNORECASE)
+ROOT_NUMBERED_TASK_PATTERN = re.compile(r"^\s*(?P<num>\d+)[\).](?!\d)\s+(?P<body>.+)$")
+NESTED_NUMBERED_ITEM_PATTERN = re.compile(r"^\s*(?P<num>\d+(?:\.\d+)+)\.?\s*(?P<body>.+)$")
 
 CONTEXT_PATTERNS = [
     re.compile(r"^\s*кластер\b.*", re.IGNORECASE),
@@ -273,9 +275,12 @@ def extract_task_candidates(
         }
 
     for idx, raw_line in enumerate(chunks):
+        stripped_line = raw_line.strip()
         cleaned_line = _clean_line_prefix(raw_line)
         if not cleaned_line:
             continue
+        root_numbered_match = ROOT_NUMBERED_TASK_PATTERN.match(stripped_line)
+        nested_numbered_match = NESTED_NUMBERED_ITEM_PATTERN.match(stripped_line)
 
         if FOOTER_PATTERN.match(cleaned_line):
             flush_current()
@@ -352,6 +357,22 @@ def extract_task_candidates(
 
         if section_name in {"informational", "footer", "metadata"}:
             # informational text is not extracted as executable tasks
+            continue
+
+        if section_name == "task_section" and root_numbered_match:
+            root_text = root_numbered_match.group("body").strip()
+            if current_body:
+                flush_current()
+            if not current_source:
+                current_order = idx
+            current_body.append(root_text)
+            current_source.append(root_text)
+            continue
+
+        if section_name == "task_section" and nested_numbered_match and current_body:
+            nested_text = f"{nested_numbered_match.group('num')}. {nested_numbered_match.group('body').strip()}"
+            current_body.append(nested_text)
+            current_source.append(nested_text)
             continue
 
         if TASK_START_PATTERN.match(raw_line) and current_body:

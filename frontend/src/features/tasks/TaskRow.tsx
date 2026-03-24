@@ -20,7 +20,24 @@ export function TaskRow({ task, topics, selected, onToggle, onPatch }: Props) {
   const hasErrors = errors.length > 0 || task.status === 'needs_completion' || task.status === 'error'
   const hasWarnings = warnings.length > 0 || task.status === 'needs_review'
   const status = hasErrors ? 'error' : hasWarnings ? 'warning' : task.status === 'draft' ? 'draft' : 'ok'
-  const allMessages = [...errors, ...warnings]
+
+  const statusMessages = useMemo(() => {
+    const allMessages = [...errors, ...warnings]
+    const normalized = allMessages
+      .map((message) => message.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .map((message) => {
+        const lowered = message.toLowerCase()
+        if (/(traceback|stack|sql|exception|http|timeout|failed|invalid|cannot)/.test(lowered)) {
+          if (lowered.includes('срок')) return 'Не указан срок'
+          if (lowered.includes('исполн')) return 'Проблема с исполнителем'
+          return 'Требуется уточнение данных'
+        }
+        if (lowered.includes('не указан срок')) return 'Не указан срок'
+        return message
+      })
+    return Array.from(new Set(normalized))
+  }, [errors, warnings])
 
   const assigneesDisplay = useMemo(() => {
     if (task.assignees_display?.trim()) return task.assignees_display
@@ -30,17 +47,6 @@ export function TaskRow({ task, topics, selected, onToggle, onPatch }: Props) {
 
   const deadlineDisplay = task.deadline_iso ?? task.deadline_raw ?? task.deadline_note ?? ''
 
-  const toneClass = (message: string) => {
-    const m = message.toLowerCase()
-    const isError = /(ошиб|не найден|invalid|failed|cannot|некоррект|невозможно)/.test(m)
-    if (isError) return 'text-red-700'
-
-    const isPositive = /(найден|успеш|подтвержден|валид|ok|готов)/.test(m)
-    if (isPositive) return 'text-green-700'
-
-    return 'text-orange-600'
-  }
-
   return (
     <tr className="border-b bg-white text-sm align-top">
       <td className="p-2"><input type="checkbox" checked={selected} onChange={onToggle} /></td>
@@ -49,7 +55,7 @@ export function TaskRow({ task, topics, selected, onToggle, onPatch }: Props) {
           <select className="w-full rounded border p-1" value={task.topic_id ?? ''} onChange={(e) => onPatch(task.id, { topic_id: e.target.value ? Number(e.target.value) : null })}>
             <option value="">Без темы</option>{topics.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
           </select>
-          <StatusBadge status={status} />
+          <StatusBadge status={status} messages={statusMessages} />
         </div>
       </td>
 
@@ -82,11 +88,6 @@ export function TaskRow({ task, topics, selected, onToggle, onPatch }: Props) {
             <input className="w-full rounded border p-1" value={task.coordinator ?? ''} onChange={(e) => onPatch(task.id, { coordinator: e.target.value || null })} placeholder="Координатор (необязательно)" />
           </div>
         </div>
-        {allMessages.length > 0 && (
-          <div className="mt-1 space-y-1 text-xs">
-            {allMessages.map((message, index) => <p key={`m-${index}`} className={cn(toneClass(message))}>• {message}</p>)}
-          </div>
-        )}
       </td>
     </tr>
   )
