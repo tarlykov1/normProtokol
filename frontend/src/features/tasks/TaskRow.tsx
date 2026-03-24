@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react'
 import { TaskCandidate, Topic } from '../../types/domain'
 import { StatusBadge } from '../../shared/ui/StatusBadge'
 import { cn } from '../../shared/lib/cn'
@@ -11,19 +12,23 @@ interface Props {
 }
 
 export function TaskRow({ task, topics, selected, onToggle, onPatch }: Props) {
+  const [fragmentExpanded, setFragmentExpanded] = useState(false)
   const errors = task.errors ?? []
   const warnings = task.warnings ?? []
   const markers = task.markers ?? []
-  const assignees = task.assignees_normalized ?? []
 
   const hasErrors = errors.length > 0 || task.status === 'needs_completion' || task.status === 'error'
   const hasWarnings = warnings.length > 0 || task.status === 'needs_review'
   const status = hasErrors ? 'error' : hasWarnings ? 'warning' : task.status === 'draft' ? 'draft' : 'ok'
-  const assigneeHints = [...errors, ...warnings].filter((item) => {
-    const lowered = item.toLowerCase()
-    return lowered.includes('исполнител') || lowered.includes('bitrix24')
-  })
   const allMessages = [...errors, ...warnings]
+
+  const assigneesDisplay = useMemo(() => {
+    if (task.assignees_display?.trim()) return task.assignees_display
+    if ((task.assignees_normalized ?? []).length) return task.assignees_normalized.join(', ')
+    return task.assignee_b24_name ?? task.assignee_raw ?? ''
+  }, [task.assignees_display, task.assignees_normalized, task.assignee_b24_name, task.assignee_raw])
+
+  const deadlineDisplay = task.deadline_iso ?? task.deadline_raw ?? task.deadline_note ?? ''
 
   const toneClass = (message: string) => {
     const m = message.toLowerCase()
@@ -40,46 +45,48 @@ export function TaskRow({ task, topics, selected, onToggle, onPatch }: Props) {
     <tr className="border-b bg-white text-sm align-top">
       <td className="p-2"><input type="checkbox" checked={selected} onChange={onToggle} /></td>
       <td className="p-2">
-        <select className="w-full rounded border p-1" value={task.topic_id ?? ''} onChange={(e) => onPatch(task.id, { topic_id: e.target.value ? Number(e.target.value) : null })}>
-          <option value="">Без темы</option>{topics.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
-        </select>
-        {(task.parent_context || task.context_label || task.section_name) && (
-          <div className="mt-1 space-y-0.5 text-xs text-slate-600">
-            {task.parent_context && <p><b>Контекст:</b> {task.parent_context}</p>}
-            {task.context_label && <p><b>Источник:</b> {task.context_label}</p>}
-            {task.section_name && <p><b>Секция:</b> {task.section_name}</p>}
-          </div>
-        )}
+        <div className="space-y-1">
+          <select className="w-full rounded border p-1" value={task.topic_id ?? ''} onChange={(e) => onPatch(task.id, { topic_id: e.target.value ? Number(e.target.value) : null })}>
+            <option value="">Без темы</option>{topics.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+          </select>
+          <StatusBadge status={status} />
+        </div>
       </td>
+
       <td className="p-2">
-        <textarea className="w-full rounded border p-1" rows={3} value={task.normalized_text} onChange={(e) => onPatch(task.id, { normalized_text: e.target.value })} />
+        <textarea className="w-full rounded border p-1" rows={2} value={task.normalized_text} onChange={(e) => onPatch(task.id, { normalized_text: e.target.value })} />
+        <div className="mt-1 rounded border bg-slate-50 p-2 text-xs text-slate-700">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="font-medium">Фрагмент из файла</span>
+            <button className="rounded border px-2 py-0.5 text-[11px]" onClick={() => setFragmentExpanded((v) => !v)}>
+              {fragmentExpanded ? 'Свернуть' : 'Развернуть'}
+            </button>
+          </div>
+          <div className={cn('whitespace-pre-wrap break-words', fragmentExpanded ? 'max-h-60 overflow-y-auto' : 'max-h-12 overflow-hidden')} title={task.source_fragment}>
+            {task.source_fragment}
+          </div>
+        </div>
         {markers.length > 0 && <p className="mt-1 text-xs text-slate-500">Маркеры: {markers.join(', ')}</p>}
       </td>
+
       <td className="p-2">
-        <input className="w-full rounded border p-1" value={task.assignee_b24_name ?? task.assignee_raw ?? ''} onChange={(e) => onPatch(task.id, { assignee_b24_name: e.target.value })} />
-        {assignees.length > 1 && <p className="mt-1 text-xs text-orange-600">Найдено несколько исполнителей: {assignees.join(', ')}</p>}
-        {assigneeHints.length > 0 && (
-          <div className="mt-1 space-y-0.5 text-xs">
-            {assigneeHints.map((hint, index) => <p key={`${task.id}-assignee-hint-${index}`} className={toneClass(hint)}>{hint}</p>)}
+        <div className="space-y-2">
+          <div>
+            <input type="date" className="w-full rounded border p-1" value={task.deadline_iso ?? ''} onChange={(e) => onPatch(task.id, { deadline_iso: e.target.value || null })} />
+            {!!deadlineDisplay && !task.deadline_iso && <p className="mt-1 text-xs text-slate-600">{deadlineDisplay}</p>}
           </div>
-        )}
-      </td>
-      <td className="p-2">
-        <input type="date" className="w-full rounded border p-1" value={task.deadline_iso ?? ''} onChange={(e) => onPatch(task.id, { deadline_iso: e.target.value || null })} />
-        <p className="mt-1 text-xs text-slate-600">{task.deadline_kind ?? 'без типа'}{task.deadline_note ? ` · ${task.deadline_note}` : ''}</p>
-      </td>
-      <td className="p-2">
-        <StatusBadge status={status} />
+          <div>
+            <input className="w-full rounded border p-1" value={assigneesDisplay} onChange={(e) => onPatch(task.id, { assignees_display: e.target.value, assignee_b24_name: e.target.value })} placeholder="Исполнители через запятую" />
+          </div>
+          <div>
+            <input className="w-full rounded border p-1" value={task.coordinator ?? ''} onChange={(e) => onPatch(task.id, { coordinator: e.target.value || null })} placeholder="Координатор (необязательно)" />
+          </div>
+        </div>
         {allMessages.length > 0 && (
           <div className="mt-1 space-y-1 text-xs">
             {allMessages.map((message, index) => <p key={`m-${index}`} className={cn(toneClass(message))}>• {message}</p>)}
           </div>
         )}
-      </td>
-      <td className="max-w-[300px] p-2 text-xs text-slate-600">
-        <div className="min-h-[4.5rem] max-h-[4.5rem] overflow-y-auto whitespace-pre-wrap break-words" title={task.source_fragment}>
-          {task.source_fragment}
-        </div>
       </td>
     </tr>
   )

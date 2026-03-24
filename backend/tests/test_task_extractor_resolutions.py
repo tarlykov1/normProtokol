@@ -41,9 +41,10 @@ def test_extract_tasks_from_reshili_section():
     ]
 
     tasks = extract_task_candidates(chunks, topic_dictionary, task_keywords=[], topic_threshold=0.1)
+    real_tasks = [task for task in tasks if task["item_kind"] == "task"]
 
-    assert len(tasks) == 7
-    assert [task["topic_auto_candidate"] for task in tasks] == [
+    assert len(real_tasks) == 7
+    assert [task["topic_auto_candidate"] for task in real_tasks] == [
         "Проект 244",
         "Проект 427",
         "Проект 153",
@@ -52,10 +53,10 @@ def test_extract_tasks_from_reshili_section():
         "Проект 441",
         "Проекты 139 и 363",
     ]
-    assert tasks[0]["assignee_raw"] == "Иванов И.И."
-    assert tasks[0]["deadline_raw"] == "01.04.2026"
-    assert tasks[0]["deadline_iso"] == "2026-04-01"
-    assert tasks[0]["topic_candidate_list"] == ["Проект 244"]
+    assert real_tasks[0]["assignee_raw"] == "Иванов И.И."
+    assert real_tasks[0]["deadline_raw"] == "01.04.2026"
+    assert real_tasks[0]["deadline_iso"] == "2026-04-01"
+    assert real_tasks[0]["topic_candidate_list"] == ["Проект 244"]
 
 
 def test_extract_tasks_from_numbered_reshili_section():
@@ -77,11 +78,32 @@ def test_extract_tasks_from_numbered_reshili_section():
     ]
 
     tasks = extract_task_candidates(chunks, topic_dictionary, task_keywords=[], topic_threshold=0.1)
+    real_tasks = [task for task in tasks if task["item_kind"] == "task"]
 
-    assert len(tasks) == 2
-    assert tasks[0]["topic_auto_candidate"] == "Проект 244"
-    assert tasks[0]["normalized_text"] == "Подготовить реестр интеграций по филиалам."
-    assert tasks[0]["topic_candidate_list"] == ["Проект 244"]
-    assert tasks[1]["topic_auto_candidate"] == "Проекты 139 и 363"
-    assert tasks[1]["assignee_raw"] == "Смирнова М.М."
-    assert tasks[1]["deadline_iso"] == "2026-04-15"
+    assert len(real_tasks) == 2
+    assert real_tasks[0]["topic_auto_candidate"] == "Проект 244"
+    assert real_tasks[0]["normalized_text"] == "Подготовить реестр интеграций по филиалам."
+    assert real_tasks[0]["topic_candidate_list"] == ["Проект 244"]
+    assert real_tasks[1]["topic_auto_candidate"] == "Проекты 139 и 363"
+    assert real_tasks[1]["assignee_raw"] == "Смирнова М.М."
+    assert real_tasks[1]["deadline_iso"] == "2026-04-15"
+
+
+def test_extracts_agenda_items_inside_reshili_and_skips_not_discussed_as_task():
+    chunks = [
+        "РЕШИЛИ:",
+        "1. Вопрос по интеграции:",
+        "Подготовить реестр интеграций.",
+        "Исполнитель: Иванов И.И., Петров П.П.",
+        "Срок: 01.04.2026",
+        "2. Вопрос по архиву (не обсуждался).",
+    ]
+    tasks = extract_task_candidates(chunks, topic_dictionary=[], task_keywords=[], topic_threshold=0.1)
+
+    agenda_items = [task for task in tasks if task["item_kind"] in {"agenda", "skipped_agenda"}]
+    real_tasks = [task for task in tasks if task["item_kind"] == "task"]
+
+    assert len(agenda_items) == 2
+    assert len(real_tasks) == 1
+    assert real_tasks[0]["assignees_display"] == "Иванов И.И., Петров П.П."
+    assert agenda_items[1]["skipped_discussion_flag"] is True

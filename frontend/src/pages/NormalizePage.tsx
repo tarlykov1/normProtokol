@@ -26,8 +26,9 @@ export function NormalizePage() {
   const filtered = useMemo(() => {
     if (!data) return []
     return data.tasks.filter((t) => {
+      if (t.item_kind !== 'task') return false
       if (filters.noTopic && t.topic_id) return false
-      if (filters.noAssignee && t.assignee_b24_name) return false
+      if (filters.noAssignee && (t.assignees_display || t.assignee_b24_name || t.assignee_raw)) return false
       if (filters.noDeadline && t.deadline_iso) return false
       if (filters.onlyErrors && !t.errors.length) return false
       if (filters.onlyUnconfirmed && !['needs_confirmation','extracted','needs_review','needs_completion'].includes(t.status)) return false
