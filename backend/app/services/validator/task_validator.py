@@ -96,6 +96,10 @@ def validate_task(
     require_topic_error: bool = False,
     bitrix_service: BaseBitrixService | None = None,
 ) -> tuple[list[str], list[str]]:
+    if getattr(task, "item_kind", "task") != "task":
+        setattr(task, "status", TaskStatus.excluded.value)
+        return [], []
+
     errors: list[str] = list(getattr(task, "errors", None) or [])
     warnings: list[str] = list(getattr(task, "warnings", None) or [])
 
@@ -123,9 +127,6 @@ def validate_task(
         errors.append("У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ.")
     elif getattr(task, "deadline_kind", None) == "text_deadline":
         warnings.append("Срок «к исполнению» не может быть опубликован как календарная дата. Уточните дату или подтвердите, что срок нефиксированный.")
-
-    if len(getattr(task, "assignees_normalized", None) or []) > 1:
-        warnings.append("Задача содержит несколько исполнителей. Уточните основного ответственного для публикации.")
 
     dedup_errors = list(dict.fromkeys(errors))
     dedup_warnings = list(dict.fromkeys(warnings))

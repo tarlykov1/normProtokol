@@ -29,6 +29,8 @@ CONTEXT_PATTERNS = [
 NOT_REVIEWED_PATTERN = re.compile(r"^\s*не\s+рассматривали\.?\s*$", re.IGNORECASE)
 NOTE_IN_BRACKETS = re.compile(r"\((?P<note>[^)]+)\)")
 ASSIGNEE_SPLIT = re.compile(r"\s*(?:,|;|/| и )\s*")
+AGENDA_HEADER_LINE_PATTERN = re.compile(r"^[A-ZА-Я0-9].{5,}:$")
+NOT_DISCUSSED_PATTERN = re.compile(r"не\s+обсуждал(?:ся|ись)?", re.IGNORECASE)
 
 
 def load_task_keywords(path: Path) -> list[str]:
@@ -103,6 +105,7 @@ def _build_task(
         return None
 
     normalized_assignees_raw, assignees, assignee_notes = _parse_assignees(assignees_raw)
+    assignees_display = ", ".join(assignees) if assignees else None
     deadline_raw, deadline_iso, deadline_kind, deadline_note = _normalize_deadline(deadline_raw_input)
 
     markers: list[str] = []
@@ -127,11 +130,16 @@ def _build_task(
             "assignee_raw": assignees[0] if assignees else None,
             "assignees_raw": normalized_assignees_raw,
             "assignees_normalized": assignees,
+            "assignees_display": assignees_display,
+            "coordinator": None,
             "deadline_raw": deadline_raw,
             "deadline_iso": deadline_iso,
             "deadline_kind": deadline_kind,
             "deadline_note": deadline_note,
             "markers": markers,
+            "item_kind": "skipped_agenda",
+            "discussed_flag": False,
+            "skipped_discussion_flag": True,
             "topic_auto_candidate": parent_context,
             "topic_candidate_list": [parent_context] if parent_context else [],
             "status": TaskStatus.excluded.value,
@@ -148,8 +156,6 @@ def _build_task(
     topic_candidate_list = _normalize_topic_candidates(topic_match.candidates) if topic_match.candidates else ([parent_context] if parent_context else [])
     topic_confidence = topic_match.confidence if topic_match.best_candidate else (1.0 if parent_context else 0.0)
 
-    if len(assignees) > 1:
-        warnings.append("Задача содержит несколько исполнителей. Уточните основного ответственного для публикации.")
     if deadline_kind == "empty_deadline":
         errors.append("У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ.")
     elif deadline_kind == "text_deadline":
@@ -173,11 +179,16 @@ def _build_task(
         "assignee_raw": assignees[0] if assignees else None,
         "assignees_raw": normalized_assignees_raw,
         "assignees_normalized": assignees,
+        "assignees_display": assignees_display,
+        "coordinator": None,
         "deadline_raw": deadline_raw,
         "deadline_iso": deadline_iso,
         "deadline_kind": deadline_kind,
         "deadline_note": deadline_note,
         "markers": markers,
+        "item_kind": "task",
+        "discussed_flag": True,
+        "skipped_discussion_flag": False,
         "topic_auto_candidate": topic_auto_candidate,
         "topic_candidate_list": topic_candidate_list,
         "status": status,
@@ -228,6 +239,39 @@ def extract_task_candidates(
         current_assignees_raw = None
         current_deadline_raw = None
 
+    def build_agenda_item(label: str, skipped: bool, order_index: int) -> dict:
+        clean_label = label.rstrip(":").strip()
+        markers = [context_label] if context_label else []
+        if skipped:
+            markers.append("not_reviewed")
+        return {
+            "source_fragment": clean_label,
+            "normalized_text": clean_label,
+            "section_name": section_name,
+            "parent_context": clean_label,
+            "context_label": "agenda_from_resolution",
+            "assignee_raw": None,
+            "assignees_raw": None,
+            "assignees_normalized": [],
+            "assignees_display": None,
+            "coordinator": None,
+            "deadline_raw": None,
+            "deadline_iso": None,
+            "deadline_kind": "empty_deadline",
+            "deadline_note": None,
+            "markers": markers,
+            "item_kind": "skipped_agenda" if skipped else "agenda",
+            "discussed_flag": not skipped,
+            "skipped_discussion_flag": skipped,
+            "topic_auto_candidate": clean_label,
+            "topic_candidate_list": [clean_label],
+            "status": TaskStatus.excluded.value,
+            "warnings": [],
+            "errors": [],
+            "order_index": order_index,
+            "topic_confidence": 0.0,
+        }
+
     for idx, raw_line in enumerate(chunks):
         cleaned_line = _clean_line_prefix(raw_line)
         if not cleaned_line:
@@ -241,6 +285,26 @@ def extract_task_candidates(
         if RESOLUTION_HEADER_PATTERN.match(cleaned_line):
             flush_current()
             section_name = "task_section"
+            continue
+
+        if (
+            section_name == "task_section"
+            and not current_body
+            and (cleaned_line.endswith(":") or NOT_DISCUSSED_PATTERN.search(cleaned_line))
+            and not ASSIGNEE_LINE_PATTERN.match(cleaned_line)
+            and not DEADLINE_LINE_PATTERN.match(cleaned_line)
+            and (
+                AGENDA_HEADER_LINE_PATTERN.match(cleaned_line)
+                or TASK_START_PATTERN.match(raw_line)
+                or "вопрос" in cleaned_line.lower()
+            )
+        ):
+            flush_current()
+            skipped_discussion = bool(NOT_DISCUSSED_PATTERN.search(cleaned_line))
+            agenda_item = build_agenda_item(cleaned_line, skipped_discussion, idx)
+            tasks.append(agenda_item)
+            parent_context = cleaned_line.rstrip(":").strip()
+            context_label = "agenda_from_resolution"
             continue
 
         if QUESTION_TASK_SECTION_PATTERN.match(cleaned_line):

@@ -6,12 +6,13 @@ interface Props {
   topics: Topic[]
   onTopic: (topicId: number | null) => void
   onDelete: () => void
-  onBulkUpdate: (payload: { assignee_b24_name?: string | null; deadline_iso?: string | null; status?: string }) => void
+  onBulkUpdate: (payload: { assignee_b24_name?: string | null; deadline_iso?: string | null; coordinator?: string | null; status?: string }) => void
 }
 
 export function BulkActionsBar({ count, topics, onTopic, onDelete, onBulkUpdate }: Props) {
   const [assignee, setAssignee] = useState('')
   const [deadline, setDeadline] = useState('')
+  const [coordinator, setCoordinator] = useState('')
 
   if (!count) return null
 
@@ -42,6 +43,18 @@ export function BulkActionsBar({ count, topics, onTopic, onDelete, onBulkUpdate 
         className="rounded border px-2 py-1"
       >
         Применить срок
+      </button>
+      <input
+        className="w-full rounded border p-1 sm:w-56"
+        placeholder="Массово: координатор"
+        value={coordinator}
+        onChange={(e) => setCoordinator(e.target.value)}
+      />
+      <button
+        onClick={() => onBulkUpdate({ coordinator: coordinator || null })}
+        className="rounded border px-2 py-1"
+      >
+        Применить координатора
       </button>
 
       <button onClick={() => onBulkUpdate({ status: 'excluded' })} className="rounded border px-2 py-1">Исключить из публикации</button>

@@ -28,6 +28,7 @@ DEBUG="${DEBUG:-false}"
 DISK_WARN_MB="${DISK_WARN_MB:-4096}"
 DISK_MIN_MB="${DISK_MIN_MB:-2048}"
 RAM_WARN_MB="${RAM_WARN_MB:-2048}"
+AUTO_SWITCH_PORTS="${AUTO_SWITCH_PORTS:-false}"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -78,15 +79,27 @@ find_free_port() {
   return 1
 }
 
+handle_busy_port() {
+  local var_name="$1"
+  local value="$2"
+  if [[ "${AUTO_SWITCH_PORTS}" == "true" ]]; then
+    warn "Порт ${var_name}=${value} занят. Ищу свободный, так как AUTO_SWITCH_PORTS=true..."
+    find_free_port "$((value + 1))"
+    return 0
+  fi
+  err "Порт ${var_name}=${value} занят. Автопереключение отключено (AUTO_SWITCH_PORTS=false)."
+  err "Освободите порт или задайте другой в deploy.env, затем перезапустите deploy.sh."
+  err "Если нужно старое поведение, запустите с AUTO_SWITCH_PORTS=true."
+  exit 1
+}
+
 if ! check_port_free "${FRONTEND_PORT}"; then
-  warn "Порт FRONTEND_PORT=${FRONTEND_PORT} занят. Ищу свободный..."
-  FRONTEND_PORT="$(find_free_port "$((FRONTEND_PORT + 1))")"
+  FRONTEND_PORT="$(handle_busy_port "FRONTEND_PORT" "${FRONTEND_PORT}")"
   warn "Выбран новый FRONTEND_PORT=${FRONTEND_PORT}"
 fi
 
 if ! check_port_free "${BACKEND_PORT}"; then
-  warn "Порт BACKEND_PORT=${BACKEND_PORT} занят. Ищу свободный..."
-  BACKEND_PORT="$(find_free_port "$((BACKEND_PORT + 1))")"
+  BACKEND_PORT="$(handle_busy_port "BACKEND_PORT" "${BACKEND_PORT}")"
   warn "Выбран новый BACKEND_PORT=${BACKEND_PORT}"
 fi
 
@@ -134,7 +147,9 @@ log "SERVER_IP=${SERVER_IP}"
 
 FRONTEND_URL="http://${SERVER_IP}:${FRONTEND_PORT}"
 BACKEND_BASE_URL="http://${SERVER_IP}:${BACKEND_PORT}"
-VITE_API_BASE_URL="${BACKEND_BASE_URL}/api"
+# Для production через docker-compose фронтенд ходит к backend через nginx proxy /api.
+# Это устраняет зависимость от внешней доступности порта backend для браузера клиента.
+VITE_API_BASE_URL="${VITE_API_BASE_URL:-/api}"
 CORS_ORIGINS="${FRONTEND_URL},http://localhost:${FRONTEND_PORT},http://127.0.0.1:${FRONTEND_PORT}"
 
 mkdir -p data/uploads data/generated backend/data
@@ -168,9 +183,8 @@ EOF
 
 log "Сгенерированы backend/.env и .env"
 
-if [[ "${VITE_API_BASE_URL}" != "${BACKEND_BASE_URL}/api" ]]; then
-  err "Несогласованный VITE_API_BASE_URL=${VITE_API_BASE_URL} (ожидалось ${BACKEND_BASE_URL}/api)"
-  exit 1
+if [[ "${VITE_API_BASE_URL}" != "/api" ]]; then
+  warn "VITE_API_BASE_URL=${VITE_API_BASE_URL}. Рекомендуется /api для работы через nginx proxy."
 fi
 
 log "Запускаю docker compose up -d --build ..."

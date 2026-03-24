@@ -83,6 +83,8 @@ def _build_skipped_task_detail(task: TaskCandidate, reason: str) -> SkippedTaskR
 
 
 def _skip_reason_for_task(task: TaskCandidate, is_publish_failure: bool = False) -> str:
+    if getattr(task, "item_kind", "task") != "task":
+        return "Элемент повестки не публикуется как поручение"
     if task.status == TaskStatus.excluded.value:
         return "Задача исключена из публикации"
     if is_publish_failure:
@@ -335,7 +337,11 @@ def publish_protocol(protocol_id: int, db: Session = Depends(get_db)):
     protocol = _get_protocol(db, protocol_id)
     service = _bitrix_service()
 
-    valid_tasks = [t for t in protocol.tasks if t.status == TaskStatus.valid.value and not t.errors]
+    valid_tasks = [
+        t
+        for t in protocol.tasks
+        if t.status == TaskStatus.valid.value and not t.errors and getattr(t, "item_kind", "task") == "task"
+    ]
     if not valid_tasks:
         raise HTTPException(status_code=400, detail="Нет валидных задач для публикации")
 
@@ -372,7 +378,15 @@ def publish_protocol(protocol_id: int, db: Session = Depends(get_db)):
             skipped_details.append(_build_skipped_task_detail(task, _skip_reason_for_task(task)))
             continue
         try:
-            task_id = service.create_task({"task_id": task.id, "title": task.normalized_text, "responsibleId": task.assignee_b24_id})
+            publish_payload = {
+                "task_id": task.id,
+                "title": task.normalized_text,
+                "responsibleId": task.assignee_b24_id,
+                # Закладываем поле заранее для будущей интеграции в Bitrix24.
+                "coordinator": task.coordinator,
+                "assignees_display": task.assignees_display,
+            }
+            task_id = service.create_task(publish_payload)
             task.bitrix_task_id = task_id
             task.status = TaskStatus.published.value
             published_tasks.append(task.id)
