@@ -11,6 +11,7 @@ from app.db.session import engine
 from app.models.base import Base
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("app.startup")
 
 app = FastAPI(title=settings.app_name, debug=settings.debug)
 app.add_middleware(
@@ -24,8 +25,21 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup_event() -> None:
-    Base.metadata.create_all(bind=engine)
-    seed_data(settings.topic_dictionary_path, settings.mock_users_path, settings.task_keywords_path)
+    logger.info("Startup step: init DB schema (create_all)")
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception:
+        logger.exception("Startup failed on DB schema init")
+        raise
+
+    logger.info("Startup step: seed data files")
+    try:
+        seed_data(settings.topic_dictionary_path, settings.mock_users_path, settings.task_keywords_path)
+    except Exception:
+        logger.exception("Startup failed on seed data")
+        raise
+
+    logger.info("Startup completed: app ready")
 
 
 @app.exception_handler(Exception)
