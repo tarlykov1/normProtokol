@@ -144,3 +144,33 @@ def test_hierarchical_numbering_creates_only_root_tasks_and_keeps_subitems_in_te
     for task in real_tasks:
         assert task["deadline_iso"] is None
         assert "У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ." in task["errors"]
+
+
+def test_hierarchical_numbering_works_when_resolution_is_single_multiline_chunk():
+    chunks = [
+        "РЕШИЛИ:\n"
+        "1. Усилить и систематизировать работу по контролю рейтинга ВЖГ.\n"
+        "1.1. Сформировать ежемесячный график контроля.\n"
+        "1.2. Сформировать чек-лист контрольных мероприятий.\n"
+        "Исполнитель: Башкатова М.Г.\n\n"
+        "2. Доработать подход по информированию рабочих.\n"
+        "Исполнитель: Башкатова М.Г.\n\n"
+        "3. Усилить и систематизировать работу психологов / адаптологов.\n"
+        "3.1. Сформировать график посещения.\n"
+        "Перезагрузить работу с СПК.\n"
+        "Исполнитель: Башкатова М.Г."
+    ]
+
+    tasks = extract_task_candidates(chunks, topic_dictionary=[], task_keywords=[], topic_threshold=0.1)
+    real_tasks = [task for task in tasks if task["item_kind"] == "task"]
+
+    assert len(real_tasks) == 3
+    assert [task["assignee_raw"] for task in real_tasks] == ["Башкатова М.Г.", "Башкатова М.Г.", "Башкатова М.Г."]
+    assert "1.1. Сформировать ежемесячный график контроля." in real_tasks[0]["normalized_text"]
+    assert "1.2. Сформировать чек-лист контрольных мероприятий." in real_tasks[0]["normalized_text"]
+    assert real_tasks[1]["normalized_text"] == "Доработать подход по информированию рабочих."
+    assert "3.1. Сформировать график посещения." in real_tasks[2]["normalized_text"]
+    assert "Перезагрузить работу с СПК." in real_tasks[2]["normalized_text"]
+    for task in real_tasks:
+        assert task["deadline_iso"] is None
+        assert "У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ." in task["errors"]
