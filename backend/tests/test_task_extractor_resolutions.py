@@ -107,3 +107,40 @@ def test_extracts_agenda_items_inside_reshili_and_skips_not_discussed_as_task():
     assert len(real_tasks) == 1
     assert real_tasks[0]["assignees_display"] == "Иванов И.И., Петров П.П."
     assert agenda_items[1]["skipped_discussion_flag"] is True
+
+
+def test_hierarchical_numbering_creates_only_root_tasks_and_keeps_subitems_in_text():
+    chunks = [
+        "РЕШИЛИ:",
+        "1. Усилить и систематизировать работу по контролю рейтинга ВЖГ.",
+        "1.1. Сформировать ежемесячный график контроля.",
+        "1.2. Сформировать чек-лист контрольных мероприятий.",
+        "Исполнитель: Башкатова М.Г.",
+        "2. Доработать подход по информированию рабочих.",
+        "Исполнитель: Башкатова М.Г.",
+        "3. Усилить и систематизировать работу психологов / адаптологов.",
+        "3.1. Сформировать график посещения.",
+        "Перезагрузить работу с СПК.",
+        "Исполнитель: Башкатова М.Г.",
+    ]
+
+    tasks = extract_task_candidates(chunks, topic_dictionary=[], task_keywords=[], topic_threshold=0.1)
+    real_tasks = [task for task in tasks if task["item_kind"] == "task"]
+
+    assert len(real_tasks) == 3
+    assert real_tasks[0]["normalized_text"].startswith("Усилить и систематизировать работу по контролю рейтинга ВЖГ.")
+    assert "1.1. Сформировать ежемесячный график контроля." in real_tasks[0]["normalized_text"]
+    assert "1.2. Сформировать чек-лист контрольных мероприятий." in real_tasks[0]["normalized_text"]
+    assert real_tasks[0]["assignee_raw"] == "Башкатова М.Г."
+
+    assert real_tasks[1]["normalized_text"] == "Доработать подход по информированию рабочих."
+    assert real_tasks[1]["assignee_raw"] == "Башкатова М.Г."
+
+    assert real_tasks[2]["normalized_text"].startswith("Усилить и систематизировать работу психологов / адаптологов.")
+    assert "3.1. Сформировать график посещения." in real_tasks[2]["normalized_text"]
+    assert "Перезагрузить работу с СПК." in real_tasks[2]["normalized_text"]
+    assert real_tasks[2]["assignee_raw"] == "Башкатова М.Г."
+
+    for task in real_tasks:
+        assert task["deadline_iso"] is None
+        assert "У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ." in task["errors"]
