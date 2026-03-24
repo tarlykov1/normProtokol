@@ -19,8 +19,8 @@ DEADLINE_LINE_PATTERN = re.compile(r"^\s*срок\s*:\s*(?P<value>.*)\s*$", re.I
 TASK_START_PATTERN = re.compile(r"^\s*(?:\d+(?!\.\d)[\).:-]\s*|[-–—•]\s+)")
 LIST_PREFIX_PATTERN = re.compile(r"^\s*(?:\d+(?!\.\d)[\).:-]\s*|[-–—•]\s*)")
 PROJECT_CONTEXT_PATTERN = re.compile(r"^\s*проекты?\b.*:\s*$", re.IGNORECASE)
-ROOT_NUMBERED_TASK_PATTERN = re.compile(r"^\s*(?P<num>\d+)\.(?!\d)\s*(?P<body>.+)$")
-NESTED_NUMBERED_ITEM_PATTERN = re.compile(r"^\s*(?P<num>\d+(?:\.\d+)+)\.?\s*(?P<body>.+)$")
+ROOT_NUMBERED_TASK_PATTERN = re.compile(r"^\s*(?P<num>\d+)\.\s+(?P<body>.+)$")
+NESTED_NUMBERED_ITEM_PATTERN = re.compile(r"^\s*(?P<num>\d+\.\d+(?:\.\d+)*)\.?\s*(?P<body>.+)$")
 
 CONTEXT_PATTERNS = [
     re.compile(r"^\s*кластер\b.*", re.IGNORECASE),
@@ -298,26 +298,6 @@ def extract_task_candidates(
             section_name = "task_section"
             continue
 
-        if (
-            section_name == "task_section"
-            and not current_body
-            and (cleaned_line.endswith(":") or NOT_DISCUSSED_PATTERN.search(cleaned_line))
-            and not ASSIGNEE_LINE_PATTERN.match(cleaned_line)
-            and not DEADLINE_LINE_PATTERN.match(cleaned_line)
-            and (
-                AGENDA_HEADER_LINE_PATTERN.match(cleaned_line)
-                or TASK_START_PATTERN.match(raw_line)
-                or "вопрос" in cleaned_line.lower()
-            )
-        ):
-            flush_current()
-            skipped_discussion = bool(NOT_DISCUSSED_PATTERN.search(cleaned_line))
-            agenda_item = build_agenda_item(cleaned_line, skipped_discussion, idx)
-            tasks.append(agenda_item)
-            parent_context = cleaned_line.rstrip(":").strip()
-            context_label = "agenda_from_resolution"
-            continue
-
         if QUESTION_TASK_SECTION_PATTERN.match(cleaned_line):
             flush_current()
             section_name = "task_section"
@@ -366,6 +346,22 @@ def extract_task_candidates(
             continue
 
         if section_name == "task_section" and root_numbered_match:
+            if (
+                not current_body
+                and (cleaned_line.endswith(":") or NOT_DISCUSSED_PATTERN.search(cleaned_line))
+                and (
+                    AGENDA_HEADER_LINE_PATTERN.match(cleaned_line)
+                    or "вопрос" in cleaned_line.lower()
+                )
+            ):
+                flush_current()
+                skipped_discussion = bool(NOT_DISCUSSED_PATTERN.search(cleaned_line))
+                agenda_item = build_agenda_item(cleaned_line, skipped_discussion, idx)
+                tasks.append(agenda_item)
+                parent_context = cleaned_line.rstrip(":").strip()
+                context_label = "agenda_from_resolution"
+                continue
+
             root_text = root_numbered_match.group("body").strip()
             if current_body:
                 flush_current()
@@ -379,6 +375,26 @@ def extract_task_candidates(
             nested_text = f"{nested_numbered_match.group('num')}. {nested_numbered_match.group('body').strip()}"
             current_body.append(nested_text)
             current_source.append(nested_text)
+            continue
+
+        if (
+            section_name == "task_section"
+            and not current_body
+            and (cleaned_line.endswith(":") or NOT_DISCUSSED_PATTERN.search(cleaned_line))
+            and not ASSIGNEE_LINE_PATTERN.match(cleaned_line)
+            and not DEADLINE_LINE_PATTERN.match(cleaned_line)
+            and (
+                AGENDA_HEADER_LINE_PATTERN.match(cleaned_line)
+                or TASK_START_PATTERN.match(raw_line)
+                or "вопрос" in cleaned_line.lower()
+            )
+        ):
+            flush_current()
+            skipped_discussion = bool(NOT_DISCUSSED_PATTERN.search(cleaned_line))
+            agenda_item = build_agenda_item(cleaned_line, skipped_discussion, idx)
+            tasks.append(agenda_item)
+            parent_context = cleaned_line.rstrip(":").strip()
+            context_label = "agenda_from_resolution"
             continue
 
         if TASK_START_PATTERN.match(raw_line) and current_body:
