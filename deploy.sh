@@ -205,6 +205,10 @@ log "Healthcheck: ${BACKEND_BASE_URL}/health"
 
 if [[ "${HEALTH_OK}" -ne 1 ]]; then
   warn "Есть проблемы с доступностью сервисов. Диагностика:"
+  warn "Последние логи backend:"
+  docker compose logs --tail=200 backend || true
+  warn "Последние логи frontend:"
+  docker compose logs --tail=120 frontend || true
   warn "- docker compose ps"
   warn "- docker compose logs --tail=200 backend frontend"
   warn "- bash status.sh"

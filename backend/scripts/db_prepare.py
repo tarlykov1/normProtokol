@@ -1,5 +1,7 @@
 import sqlite3
 import subprocess
+from datetime import datetime, UTC
+import os
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -44,8 +46,23 @@ def _run_alembic(*args: str) -> None:
     subprocess.run(["alembic", *args], check=True)
 
 
+def _log(message: str) -> None:
+    print(f"[db_prepare] {message}", flush=True)
+
+
+def _backup_and_reset_sqlite(db_path: Path) -> Path:
+    backup_name = f"{db_path.stem}.bak-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}{db_path.suffix}"
+    backup_path = db_path.with_name(backup_name)
+    db_path.rename(backup_path)
+    _log(f"Incompatible DB moved to backup: {backup_path}")
+    return backup_path
+
+
 def main() -> None:
+    _log(f"Preparing database for URL: {settings.database_url}")
+
     if not settings.database_url.startswith("sqlite"):
+        _log("Non-SQLite DB detected, running alembic upgrade head")
         _run_alembic("upgrade", "head")
         return
 
@@ -53,6 +70,7 @@ def main() -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not db_path.exists():
+        _log(f"SQLite DB does not exist yet ({db_path}), creating via alembic")
         _run_alembic("upgrade", "head")
         return
 
@@ -60,6 +78,7 @@ def main() -> None:
     try:
         has_alembic = _table_exists(conn, "alembic_version")
         if has_alembic:
+            _log("Found alembic_version table, applying migrations")
             _run_alembic("upgrade", "head")
             return
 
@@ -71,16 +90,30 @@ def main() -> None:
 
         if missing:
             details = "; ".join(f"{table}: {', '.join(sorted(cols))}" for table, cols in missing.items())
-            raise RuntimeError(
+            strategy = os.getenv("SQLITE_INCOMPATIBLE_STRATEGY", "backup_reset").strip().lower()
+            message = (
                 "Обнаружена старая SQLite-схема без alembic_version. "
                 f"Не хватает колонок ({details}). "
-                "Сделайте backup data/app.db, затем удалите файл и повторите deploy/update."
+                "Рекомендуется backup + пересоздание базы."
             )
+            if strategy != "backup_reset":
+                raise RuntimeError(f"{message} Текущая стратегия={strategy}, авто-восстановление отключено.")
 
+            _log(message)
+            conn.close()
+            _backup_and_reset_sqlite(db_path)
+            _log("Recreating SQLite DB from alembic migrations")
+            _run_alembic("upgrade", "head")
+            return
+
+        _log("Legacy SQLite schema is compatible, stamping alembic head")
         _run_alembic("stamp", "head")
         _run_alembic("upgrade", "head")
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
