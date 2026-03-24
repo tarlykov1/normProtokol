@@ -37,6 +37,7 @@ require_cmd() {
 }
 
 require_cmd docker
+require_cmd curl
 if ! docker compose version >/dev/null 2>&1; then
   err "docker compose plugin не найден. Запустите: bash bootstrap.sh"
   exit 1
@@ -50,6 +51,11 @@ fi
 if ! [[ "${FRONTEND_PORT}" =~ ^[0-9]+$ && "${BACKEND_PORT}" =~ ^[0-9]+$ ]]; then
   err "FRONTEND_PORT и BACKEND_PORT должны быть числами"
   exit 1
+fi
+
+if docker compose ps -q | grep -q .; then
+  log "Останавливаю текущие контейнеры перед проверкой портов, чтобы избежать ложной смены портов..."
+  docker compose down --remove-orphans
 fi
 
 check_port_free() {
@@ -162,6 +168,11 @@ EOF
 
 log "Сгенерированы backend/.env и .env"
 
+if [[ "${VITE_API_BASE_URL}" != "${BACKEND_BASE_URL}/api" ]]; then
+  err "Несогласованный VITE_API_BASE_URL=${VITE_API_BASE_URL} (ожидалось ${BACKEND_BASE_URL}/api)"
+  exit 1
+fi
+
 log "Запускаю docker compose up -d --build ..."
 docker compose up -d --build
 
@@ -181,6 +192,11 @@ if ! curl -fsS --max-time 10 "${FRONTEND_URL}" >/dev/null; then
   warn "Frontend недоступен: ${FRONTEND_URL}"
 fi
 
+if ! curl -fsS --max-time 10 "${BACKEND_BASE_URL}/openapi.json" | grep -q "\"/api/protocols/upload\""; then
+  HEALTH_OK=0
+  warn "Upload API недоступен или OpenAPI не содержит /api/protocols/upload"
+fi
+
 echo
 log "Деплой завершен."
 log "Frontend URL: ${FRONTEND_URL}"
@@ -189,6 +205,10 @@ log "Healthcheck: ${BACKEND_BASE_URL}/health"
 
 if [[ "${HEALTH_OK}" -ne 1 ]]; then
   warn "Есть проблемы с доступностью сервисов. Диагностика:"
+  warn "Последние логи backend:"
+  docker compose logs --tail=200 backend || true
+  warn "Последние логи frontend:"
+  docker compose logs --tail=120 frontend || true
   warn "- docker compose ps"
   warn "- docker compose logs --tail=200 backend frontend"
   warn "- bash status.sh"
