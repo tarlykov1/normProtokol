@@ -32,6 +32,14 @@ class TaskRead(BaseModel):
     errors: list[str]
     order_index: int
     bitrix_task_id: str | None
+    section_name: str | None = None
+    parent_context: str | None = None
+    context_label: str | None = None
+    assignees_raw: str | None = None
+    assignees_normalized: list[str] = Field(default_factory=list)
+    deadline_kind: str | None = None
+    deadline_note: str | None = None
+    markers: list[str] = Field(default_factory=list)
 
     @field_validator("topic_candidate_list", mode="before")
     @classmethod
@@ -77,6 +85,9 @@ class TaskPatch(BaseModel):
     assignee_b24_name: str | None = None
     deadline_iso: str | None = None
     status: str | None = None
+    assignees_normalized: list[str] | None = None
+    deadline_kind: str | None = None
+    deadline_note: str | None = None
 
 
 class TaskCreate(BaseModel):
@@ -128,6 +139,9 @@ class BulkTaskUpdatePayload(BaseModel):
     assignee_b24_name: str | None = None
     deadline_iso: str | None = None
     status: str | None = None
+    assignees_normalized: list[str] | None = None
+    deadline_kind: str | None = None
+    deadline_note: str | None = None
 
 
 class ValidationTaskResult(BaseModel):

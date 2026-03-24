@@ -2,11 +2,12 @@ import { useRef, useState } from 'react'
 import { ProtocolType } from '../../types/domain'
 
 const protocolTypeOptions: Array<{ value: ProtocolType; label: string }> = [
-  { value: 'standard', label: 'Стандартный' },
-  { value: 'topics', label: 'По темам' },
-  { value: 'blocks', label: 'По блокам' },
-  { value: 'projects', label: 'По проектам' },
-  { value: 'simple', label: 'Простой' }
+  { value: 'auto', label: 'Автоопределение (рекомендуется)' },
+  { value: 'memo_meeting', label: 'Мемо рабочей встречи' },
+  { value: 'memo_preparation', label: 'Мемо подготовки к совещанию' },
+  { value: 'memo_mixed_sections', label: 'Мемо со смешанными секциями' },
+  { value: 'memo_hierarchical', label: 'Иерархическое мемо' },
+  { value: 'simple', label: 'Простой документ' }
 ]
 
 export function UploadDropzone({
@@ -32,7 +33,7 @@ export function UploadDropzone({
     >
       <p className="mb-2 text-sm">Перетащите .docx файл или выберите вручную.</p>
       <div className="mx-auto mb-4 max-w-sm text-left">
-        <label className="mb-1 block text-xs text-slate-600">Тип протокола</label>
+        <label className="mb-1 block text-xs text-slate-600">Тип документа</label>
         <select
           className="w-full rounded border px-2 py-1 text-sm"
           value={protocolType}
