@@ -1,9 +1,14 @@
 import sqlite3
 import subprocess
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 import os
+import sys
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.core.config import settings
 
@@ -43,7 +48,7 @@ def _missing_columns(conn: sqlite3.Connection, table: str, required: set[str]) -
 
 
 def _run_alembic(*args: str) -> None:
-    subprocess.run(["alembic", *args], check=True)
+    subprocess.run([sys.executable, "-m", "alembic", *args], check=True)
 
 
 def _log(message: str) -> None:
@@ -51,7 +56,7 @@ def _log(message: str) -> None:
 
 
 def _backup_and_reset_sqlite(db_path: Path) -> Path:
-    backup_name = f"{db_path.stem}.bak-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}{db_path.suffix}"
+    backup_name = f"{db_path.stem}.bak-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}{db_path.suffix}"
     backup_path = db_path.with_name(backup_name)
     db_path.rename(backup_path)
     _log(f"Incompatible DB moved to backup: {backup_path}")
@@ -117,4 +122,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        _log(f"FATAL: {exc}")
+        raise
