@@ -97,6 +97,16 @@ def _skip_reason_for_task(task: TaskCandidate, is_publish_failure: bool = False)
     return "Задача не прошла валидацию"
 
 
+def _remove_file_if_exists(path_value: str | None) -> bool:
+    if not path_value:
+        return False
+    path = Path(path_value)
+    if not path.exists():
+        return False
+    path.unlink()
+    return True
+
+
 @router.post("/demo/bootstrap", response_model=ProtocolRead, tags=["demo"])
 def bootstrap_demo_protocol(db: Session = Depends(get_db)):
     protocol = Protocol(
@@ -259,6 +269,28 @@ def list_protocols(db: Session = Depends(get_db)):
 @router.get("/protocols/{protocol_id}", response_model=ProtocolRead, tags=["protocols"])
 def get_protocol(protocol_id: int, db: Session = Depends(get_db)):
     return _get_protocol(db, protocol_id)
+
+
+@router.delete("/protocols/{protocol_id}", tags=["protocols"])
+def delete_protocol(protocol_id: int, db: Session = Depends(get_db)):
+    protocol = _get_protocol(db, protocol_id)
+
+    removed_files = {
+        "original_file": _remove_file_if_exists(protocol.original_file_path),
+        "generated_docx": _remove_file_if_exists(protocol.normalized_docx_path),
+        "published_docx": _remove_file_if_exists(protocol.published_docx_path),
+    }
+
+    deleted_audit_logs = db.query(AuditLog).filter(AuditLog.protocol_id == protocol.id).delete(synchronize_session=False)
+    db.delete(protocol)
+    db.commit()
+
+    return {
+        "status": "deleted",
+        "protocol_id": protocol_id,
+        "deleted_audit_logs": deleted_audit_logs,
+        "removed_files": removed_files,
+    }
 
 
 @router.get("/protocols/{protocol_id}/draft", response_model=ProtocolRead, tags=["protocols"])

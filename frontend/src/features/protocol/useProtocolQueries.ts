@@ -15,6 +15,17 @@ export function useUploadProtocol() {
   return useMutation({ mutationFn: protocolsApi.upload, onSuccess: (data) => { qc.setQueryData(['protocol', data.id], data); qc.invalidateQueries({ queryKey: ['protocols'] }); qc.invalidateQueries({ queryKey: ['protocol', data.id] }) } })
 }
 
+export function useDeleteProtocol() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: protocolsApi.remove,
+    onSuccess: (_, protocolId) => {
+      qc.removeQueries({ queryKey: ['protocol', protocolId] })
+      qc.invalidateQueries({ queryKey: ['protocols'] })
+    }
+  })
+}
+
 export function usePatchTask(protocolId?: number) {
   const qc = useQueryClient()
   return useMutation({ mutationFn: ({ id, patch }: { id: number; patch: Record<string, unknown> }) => tasksApi.patch(id, patch), onSuccess: () => qc.invalidateQueries({ queryKey: ['protocol', protocolId] }) })

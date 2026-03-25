@@ -12,19 +12,20 @@ const tabs = [
 export function AppLayout() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
-  const unlocked = sessionStorage.getItem('normprotokol-gate') === 'ok'
+  const [isUnlocked, setIsUnlocked] = useState(() => sessionStorage.getItem('normprotokol-gate') === 'ok')
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault()
     if (password === '2156') {
       sessionStorage.setItem('normprotokol-gate', 'ok')
+      setIsUnlocked(true)
       setError('')
       return
     }
     setError('Неверный пароль')
   }
 
-  if (!unlocked) {
+  if (!isUnlocked) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
         <form onSubmit={onSubmit} className="w-full max-w-sm space-y-3 rounded border bg-white p-4">
