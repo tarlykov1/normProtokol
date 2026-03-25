@@ -275,3 +275,59 @@ def test_resolution_without_numbering_is_split_by_assignee_boundaries_into_three
         assert task["assignee_raw"] == "Башкатова М.Г."
         assert task["deadline_iso"] is None
         assert "У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ." in task["errors"]
+
+
+def test_meeting_resolution_marker_splits_context_from_new_tasks_and_keeps_nested_numbered_list_inside_single_task():
+    chunks = [
+        "Решили:",
+        "1. Согласование/утверждение 19 СОП у Еремина М.А.",
+        "Исполнители: Сильченко М.С.",
+        "Срок: 30.12.2025",
+        "Решение по итогам рабочей встречи от 21.01.2026:",
+        "- Вынести на рассмотрение и утверждение с Генеральным директором согласованные СОП.",
+        "Исполнители: Трамп Д.Ф.",
+        "- Принять нормы предложенные Сильченко М.С. и командой ООО «Лин Вектор» по 7 проектам:",
+        "1. Автоматическая сварка на трассе комплексами CRC",
+        "2. Ручная сварка на трассе трубопроводов",
+        "3. Монтаж технологических захлестав",
+        "4. Монтаж термоусаживаемой манжеты",
+        "5. Укладка трубопроводов",
+        "6. Монтаж скального листа на трубопровод",
+        "7. Присыпка трубопровода привозным грунтом",
+        "- Переработать СОП «Расчистка полосы отвода от лесорастительности» определить нормы. (разделить на 3 СОП в зависимости от объемов лесорасчистки)",
+        "Исполнители: Хусаинов М.Ф., Сильченко М.С., Щуров О.А., Ульрих Р.В.",
+        "Срок:",
+    ]
+
+    tasks = extract_task_candidates(chunks, topic_dictionary=[], task_keywords=[], topic_threshold=0.1)
+    real_tasks = [task for task in tasks if task["item_kind"] == "task"]
+    agenda_items = [task for task in tasks if task["item_kind"] == "agenda"]
+
+    assert len(real_tasks) == 3
+    assert len(agenda_items) == 1
+    assert "Согласование/утверждение 19 СОП у Еремина М.А." in agenda_items[0]["normalized_text"]
+    assert agenda_items[0]["context_label"] == "meeting_resolution_context"
+
+    assert real_tasks[0]["normalized_text"].startswith(
+        "Вынести на рассмотрение и утверждение с Генеральным директором согласованные СОП."
+    )
+    assert real_tasks[0]["assignee_raw"] == "Трамп Д.Ф."
+    assert "У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ." in real_tasks[0]["errors"]
+
+    assert real_tasks[1]["normalized_text"].startswith(
+        "Принять нормы предложенные Сильченко М.С. и командой ООО «Лин Вектор» по 7 проектам:"
+    )
+    assert "1. Автоматическая сварка на трассе комплексами CRC" in real_tasks[1]["normalized_text"]
+    assert "7. Присыпка трубопровода привозным грунтом" in real_tasks[1]["normalized_text"]
+
+    assert real_tasks[2]["normalized_text"].startswith(
+        "Переработать СОП «Расчистка полосы отвода от лесорастительности» определить нормы."
+    )
+    assert real_tasks[2]["assignees_normalized"] == [
+        "Хусаинов М.Ф.",
+        "Сильченко М.С.",
+        "Щуров О.А.",
+        "Ульрих Р.В.",
+    ]
+    assert real_tasks[2]["assignees_display"] == "Хусаинов М.Ф., Сильченко М.С., Щуров О.А., Ульрих Р.В."
+    assert "У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ." in real_tasks[2]["errors"]
