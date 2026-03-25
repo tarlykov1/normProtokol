@@ -178,3 +178,53 @@ def test_hierarchical_numbering_works_when_resolution_is_single_multiline_chunk(
     for task in real_tasks:
         assert task["deadline_iso"] is None
         assert "У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ." in task["errors"]
+
+
+def test_hierarchical_resolution_with_exact_user_text_is_split_into_three_tasks_even_when_flattened():
+    resolution_text = (
+        "РЕШИЛИ:\n\n"
+        "1. Усилить и систематизировать работу по контролю рейтинга ВЖГ.\n"
+        "1.1. Сформировать ежемесячный график выездов на объекты строительства с целью независимой оценки ВЖГ и социально психологического климата на них.\n"
+        "1.2. Сформировать чек-лист независимой оценки ВЖГ и социально психологического климата.\n"
+        "Исполнитель: Башкатова М.Г.\n\n"
+        "2. Доработать подход по информированию рабочих на строительных объектах с учетом актуальности каналов информирования.\n"
+        "Исполнитель: Башкатова М.Г.\n\n"
+        "3. Усилить и систематизировать работу психологов/адаптологов по управлению социально-психологическим климатом работников:\n"
+        "3.1. Сформировать график посещения объектов строительства (мин. 2 раза за вахту + дежурства на пунктах развозки/остановки).\n"
+        "Перезагрузить работу с СПК.\n"
+        "Исполнитель: Башкатова М.Г."
+    )
+
+    chunks = [" ".join(part for part in resolution_text.split())]
+    tasks = extract_task_candidates(chunks, topic_dictionary=[], task_keywords=[], topic_threshold=0.1)
+    real_tasks = [task for task in tasks if task["item_kind"] == "task"]
+
+    assert len(real_tasks) == 3
+    task_1, task_2, task_3 = real_tasks
+
+    assert task_1["normalized_text"].startswith("Усилить и систематизировать работу по контролю рейтинга ВЖГ.")
+    assert "1.1. Сформировать ежемесячный график выездов" in task_1["normalized_text"]
+    assert "1.2. Сформировать чек-лист независимой оценки ВЖГ" in task_1["normalized_text"]
+    assert task_1["assignee_raw"] == "Башкатова М.Г."
+    assert "2. Доработать подход по информированию рабочих" not in task_1["normalized_text"]
+    assert "3. Усилить и систематизировать работу психологов/адаптологов" not in task_1["normalized_text"]
+
+    assert task_2["normalized_text"].startswith(
+        "Доработать подход по информированию рабочих на строительных объектах"
+    )
+    assert task_2["assignee_raw"] == "Башкатова М.Г."
+    assert "Усилить и систематизировать работу по контролю рейтинга ВЖГ." not in task_2["normalized_text"]
+    assert "Усилить и систематизировать работу психологов/адаптологов" not in task_2["normalized_text"]
+
+    assert task_3["normalized_text"].startswith(
+        "Усилить и систематизировать работу психологов/адаптологов по управлению социально-психологическим климатом работников:"
+    )
+    assert "3.1. Сформировать график посещения объектов строительства" in task_3["normalized_text"]
+    assert "Перезагрузить работу с СПК." in task_3["normalized_text"]
+    assert task_3["assignee_raw"] == "Башкатова М.Г."
+    assert "Усилить и систематизировать работу по контролю рейтинга ВЖГ." not in task_3["normalized_text"]
+    assert "2. Доработать подход по информированию рабочих" not in task_3["normalized_text"]
+
+    for task in real_tasks:
+        assert task["deadline_iso"] is None
+        assert "У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ." in task["errors"]
