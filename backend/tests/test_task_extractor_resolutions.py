@@ -228,3 +228,50 @@ def test_hierarchical_resolution_with_exact_user_text_is_split_into_three_tasks_
     for task in real_tasks:
         assert task["deadline_iso"] is None
         assert "У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ." in task["errors"]
+
+
+def test_resolution_without_numbering_is_split_by_assignee_boundaries_into_three_tasks():
+    chunks = [
+        "РЕШИЛИ:",
+        "Усилить и систематизировать работу по контролю рейтинга ВЖГ.",
+        "Сформировать ежемесячный график выездов на объекты строительства с целью независимой оценки ВЖГ и социально психологического климата на них.",
+        "Сформировать чек-лист независимой оценки ВЖГ и социально психологического климата.",
+        "Исполнитель: Башкатова М.Г.",
+        "Доработать подход по информированию рабочих на строительных объектах с учетом актуальности каналов информирования.",
+        "Исполнитель: Башкатова М.Г.",
+        "Усилить и систематизировать работу психологов/адаптологов по управлению социально-психологическим климатом работников.",
+        "Перезагрузить работу с СПК.",
+        "Исполнитель: Башкатова М.Г.",
+    ]
+
+    tasks = extract_task_candidates(chunks, topic_dictionary=[], task_keywords=[], topic_threshold=0.1)
+    real_tasks = [task for task in tasks if task["item_kind"] == "task"]
+
+    assert len(real_tasks) == 3
+    assert len(real_tasks) != 1
+    assert len(real_tasks) != 2
+    assert len(real_tasks) != 5
+
+    task_1, task_2, task_3 = real_tasks
+
+    assert "контролю рейтинга ВЖГ" in task_1["normalized_text"]
+    assert "ежемесячный график выездов" in task_1["normalized_text"]
+    assert "чек-лист независимой оценки ВЖГ" in task_1["normalized_text"]
+    assert "Доработать подход по информированию" not in task_1["normalized_text"]
+    assert "психологов/адаптологов" not in task_1["normalized_text"]
+
+    assert task_2["normalized_text"].startswith("Доработать подход по информированию рабочих")
+    assert "контролю рейтинга ВЖГ" not in task_2["normalized_text"]
+    assert "психологов/адаптологов" not in task_2["normalized_text"]
+
+    assert task_3["normalized_text"].startswith(
+        "Усилить и систематизировать работу психологов/адаптологов"
+    )
+    assert "Перезагрузить работу с СПК." in task_3["normalized_text"]
+    assert "контролю рейтинга ВЖГ" not in task_3["normalized_text"]
+    assert "Доработать подход по информированию" not in task_3["normalized_text"]
+
+    for task in real_tasks:
+        assert task["assignee_raw"] == "Башкатова М.Г."
+        assert task["deadline_iso"] is None
+        assert "У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ." in task["errors"]
