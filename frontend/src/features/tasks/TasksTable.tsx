@@ -12,7 +12,13 @@ interface Props {
 export function TasksTable({ tasks, topics, selectedIds, onToggle, onPatch }: Props) {
   return (
     <div className="overflow-x-auto rounded border">
-      <table className="min-w-[920px] md:min-w-full">
+      <table className="min-w-[920px] table-fixed md:min-w-full">
+        <colgroup>
+          <col className="w-10" />
+          <col className="w-[24%]" />
+          <col className="w-[46%]" />
+          <col className="w-[28%]" />
+        </colgroup>
         <thead className="bg-slate-100 text-left text-xs uppercase">
           <tr><th className="p-2"/><th className="p-2">Тема / статус / причины</th><th className="p-2">Задача</th><th className="p-2">Срок / исполнители / координатор</th></tr>
         </thead>

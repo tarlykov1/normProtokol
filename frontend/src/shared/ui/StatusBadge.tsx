@@ -22,11 +22,9 @@ export function StatusBadge({ status, messages = [] }: Props) {
     <div className="space-y-1">
       <span className={cn('inline-flex rounded px-2 py-1 text-xs font-medium', c)}>{label}</span>
       {messages.length > 0 && (
-        <ul className="space-y-0.5 text-xs text-slate-700">
+        <ul className="list-disc space-y-0.5 pl-4 text-xs text-slate-700">
           {messages.map((message, index) => (
-            <li key={`${status}-${index}`} className="leading-4">
-              • {message}
-            </li>
+            <li key={`${status}-${index}`} className="leading-4 break-words">{message}</li>
           ))}
         </ul>
       )}

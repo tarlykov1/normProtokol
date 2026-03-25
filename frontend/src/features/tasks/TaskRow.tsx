@@ -50,12 +50,14 @@ export function TaskRow({ task, topics, selected, onToggle, onPatch }: Props) {
   return (
     <tr className="border-b bg-white text-sm align-top">
       <td className="p-2"><input type="checkbox" checked={selected} onChange={onToggle} /></td>
-      <td className="p-2">
-        <div className="space-y-1">
+      <td className="p-2 align-top">
+        <div className="space-y-1.5">
           <select className="w-full rounded border p-1" value={task.topic_id ?? ''} onChange={(e) => onPatch(task.id, { topic_id: e.target.value ? Number(e.target.value) : null })}>
             <option value="">Без темы</option>{topics.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
           </select>
-          <StatusBadge status={status} messages={statusMessages} />
+          <div className="max-w-full break-words">
+            <StatusBadge status={status} messages={statusMessages} />
+          </div>
         </div>
       </td>
 
@@ -75,7 +77,7 @@ export function TaskRow({ task, topics, selected, onToggle, onPatch }: Props) {
         {markers.length > 0 && <p className="mt-1 text-xs text-slate-500">Маркеры: {markers.join(', ')}</p>}
       </td>
 
-      <td className="p-2">
+      <td className="p-2 align-top">
         <div className="space-y-2">
           <div>
             <input type="date" className="w-full rounded border p-1" value={task.deadline_iso ?? ''} onChange={(e) => onPatch(task.id, { deadline_iso: e.target.value || null })} />
