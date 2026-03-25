@@ -26,3 +26,23 @@ def test_validator_allows_multiple_assignees_without_warning():
     errors, warnings = validate_task(task)
     assert not errors
     assert not any("несколько исполнителей" in warning.lower() for warning in warnings)
+
+
+def test_validator_reports_human_readable_warning_for_text_deadline():
+    task = SimpleNamespace(
+        normalized_text="Подготовить отчет",
+        topic_id=1,
+        assignee_b24_id="101",
+        assignee_b24_name="Иванов И.И.",
+        assignees_normalized=["Иванов И.И."],
+        deadline_raw="до конца месяца",
+        deadline_iso=None,
+        deadline_kind="text_deadline",
+        errors=[],
+        warnings=[],
+        markers=[],
+        item_kind="task",
+    )
+    errors, warnings = validate_task(task)
+    assert not errors
+    assert "Срок «до конца месяца» не распознан как календарная дата. Уточните дату в формате ДД.ММ.ГГГГ." in warnings

@@ -15,6 +15,8 @@ def _iter_block_items(parent):
 
 
 def _clean(value: str) -> str:
+    value = value.replace("\u00ad", "")
+    value = re.sub(r"(\w)-\s+(\w)", r"\1\2", value)
     value = re.sub(r"\s+", " ", value).strip()
     return value
 

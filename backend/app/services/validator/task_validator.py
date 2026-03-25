@@ -126,7 +126,10 @@ def validate_task(
     if getattr(task, "deadline_kind", None) == "empty_deadline":
         errors.append("У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ.")
     elif getattr(task, "deadline_kind", None) == "text_deadline":
-        warnings.append("Срок «к исполнению» не может быть опубликован как календарная дата. Уточните дату или подтвердите, что срок нефиксированный.")
+        deadline_raw = getattr(task, "deadline_raw", None) or "текстовый срок"
+        warnings.append(
+            f"Срок «{deadline_raw}» не распознан как календарная дата. Уточните дату в формате ДД.ММ.ГГГГ."
+        )
 
     dedup_errors = list(dict.fromkeys(errors))
     dedup_warnings = list(dict.fromkeys(warnings))
