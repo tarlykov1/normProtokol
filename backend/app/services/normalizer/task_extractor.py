@@ -37,7 +37,15 @@ NOT_REVIEWED_PATTERN = re.compile(r"^\s*не\s+рассматривали\.?\s*$
 NOTE_IN_BRACKETS = re.compile(r"\((?P<note>[^)]+)\)")
 ASSIGNEE_SPLIT = re.compile(r"\s*(?:,|;|/| и )\s*")
 AGENDA_HEADER_LINE_PATTERN = re.compile(r"^[A-ZА-Я0-9].{5,}:$")
-NOT_DISCUSSED_PATTERN = re.compile(r"не\s+обсуждал(?:ся|ись)?", re.IGNORECASE)
+NOT_DISCUSSED_PATTERN = re.compile(
+    r"не\s+(?:обсуждал(?:ся|ись)?|рассматривал(?:ся|ись|и)?)",
+    re.IGNORECASE,
+)
+SERVICE_LINE_PATTERN = re.compile(
+    r"^\s*(?:мемо\s+подготовил[аиы]?|прилагается|обзор\s+текущего\s+состояния|обсуждение\s+проблем|предложения\s+по\s+улучшению)\b.*$",
+    re.IGNORECASE,
+)
+SOFT_WORD_CONTINUATION_PATTERN = re.compile(r"^[а-яa-z]{1,5}$")
 
 
 def load_task_keywords(path: Path) -> list[str]:
@@ -97,6 +105,28 @@ def _normalize_deadline(raw_value: str | None) -> tuple[str | None, str | None, 
         return raw, iso, "exact_date", note
 
     return raw, None, "text_deadline", note
+
+
+def _append_body_line(body_lines: list[str], source_lines: list[str], line: str) -> None:
+    normalized_line = line.strip()
+    if not normalized_line:
+        return
+
+    if body_lines:
+        prev = body_lines[-1]
+        if (
+            prev
+            and prev[-1].isalpha()
+            and SOFT_WORD_CONTINUATION_PATTERN.match(normalized_line)
+            and normalized_line[0].islower()
+        ):
+            body_lines[-1] = f"{prev}{normalized_line}"
+            if source_lines:
+                source_lines[-1] = body_lines[-1]
+            return
+
+    body_lines.append(normalized_line)
+    source_lines.append(normalized_line)
 
 
 def _build_task(
@@ -171,7 +201,10 @@ def _build_task(
     if deadline_kind == "empty_deadline":
         errors.append("У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ.")
     elif deadline_kind == "text_deadline":
-        warnings.append("Срок «к исполнению» не может быть опубликован как календарная дата. Уточните дату или подтвердите нефиксированный срок.")
+        display_deadline = deadline_raw or "текстовый срок"
+        warnings.append(
+            f"Срок «{display_deadline}» не распознан как календарная дата. Уточните дату в формате ДД.ММ.ГГГГ."
+        )
 
     if not normalized_text:
         errors.append("Задача содержит только тему или контекст без действия. Доработайте формулировку поручения.")
@@ -385,6 +418,11 @@ def extract_task_candidates(
             section_name = "footer"
             continue
 
+        if SERVICE_LINE_PATTERN.match(cleaned_line):
+            if current_body:
+                flush_current()
+            continue
+
         if RESOLUTION_HEADER_PATTERN.match(cleaned_line):
             flush_current()
             section_name = "task_section"
@@ -542,8 +580,7 @@ def extract_task_candidates(
             if keep_as_part_of_root_task:
                 if not current_source:
                     current_order = idx
-                current_body.append(cleaned_line)
-                current_source.append(cleaned_line)
+                _append_body_line(current_body, current_source, cleaned_line)
                 current_closed_by_assignee = False
                 continue
             flush_current()
@@ -551,8 +588,7 @@ def extract_task_candidates(
         if not current_source:
             current_order = idx
 
-        current_body.append(cleaned_line)
-        current_source.append(cleaned_line)
+        _append_body_line(current_body, current_source, cleaned_line)
         if re.match(r"^\s*[-–—•]\s+", raw_line):
             current_started_by_bullet = True
             current_started_by_root_numbering = False

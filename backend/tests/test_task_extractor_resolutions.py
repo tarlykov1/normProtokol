@@ -379,3 +379,38 @@ def test_meeting_resolution_marker_splits_context_from_new_tasks_and_keeps_neste
     ]
     assert real_tasks[2]["assignees_display"] == "Хусаинов М.Ф., Сильченко М.С., Щуров О.А., Ульрих Р.В."
     assert "У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ." in real_tasks[2]["errors"]
+
+
+def test_not_discussed_variants_are_extracted_as_skipped_agenda_items():
+    chunks = [
+        "РЕШИЛИ:",
+        "1. Вопрос по интеграции (не обсуждались).",
+        "2. Вопрос по архиву (не рассматривался).",
+    ]
+
+    tasks = extract_task_candidates(chunks, topic_dictionary=[], task_keywords=[], topic_threshold=0.1)
+    skipped_items = [task for task in tasks if task["item_kind"] == "skipped_agenda"]
+    real_tasks = [task for task in tasks if task["item_kind"] == "task"]
+
+    assert len(real_tasks) == 0
+    assert len(skipped_items) == 2
+    assert all(item["skipped_discussion_flag"] for item in skipped_items)
+
+
+def test_text_deadline_keeps_task_and_returns_human_warning():
+    chunks = [
+        "РЕШИЛИ:",
+        "Подготовить обновленный план внедрения.",
+        "Исполнитель: Иванов И.И.",
+        "Срок: до конца месяца",
+    ]
+
+    tasks = extract_task_candidates(chunks, topic_dictionary=[], task_keywords=[], topic_threshold=0.1)
+    real_tasks = [task for task in tasks if task["item_kind"] == "task"]
+
+    assert len(real_tasks) == 1
+    task = real_tasks[0]
+    assert task["deadline_raw"] == "до конца месяца"
+    assert task["deadline_iso"] is None
+    assert task["deadline_kind"] == "text_deadline"
+    assert "Срок «до конца месяца» не распознан как календарная дата. Уточните дату в формате ДД.ММ.ГГГГ." in task["warnings"]
