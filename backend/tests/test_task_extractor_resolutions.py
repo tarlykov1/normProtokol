@@ -230,6 +230,54 @@ def test_hierarchical_resolution_with_exact_user_text_is_split_into_three_tasks_
         assert "У задачи не указан срок. Добавьте дату в формате ДД.ММ.ГГГГ." in task["errors"]
 
 
+def test_hierarchical_root_item_with_own_assignees_and_deadline_stays_single_task():
+    chunks = [
+        "РЕШИЛИ:",
+        "1. Разработать программу мероприятия, повестку дня заседания Научно-технического совета АО «Газстройпром» под руководством Аксютина О.Е. в следующем формате:",
+        "1.1. Формирование матрицы научно-технической деятельности по направлениям.",
+        "1.2. Организация выездного мероприятия в одной из трех локаций:",
+        "– Тюмень.",
+        "– Санкт-Петербург.",
+        "– Москва.",
+        "Исполнители: Грибачев С.П., Снастин М.А., Ткаченко А.Н., Чиганаев М.С., Закиев А.А., Идиятуллин А.Р., Монахов Н.В., Ершова И.В.",
+        "Срок: 16.03.2026",
+    ]
+
+    tasks = extract_task_candidates(chunks, topic_dictionary=[], task_keywords=[], topic_threshold=0.1)
+    real_tasks = [task for task in tasks if task["item_kind"] == "task"]
+    agenda_items = [task for task in tasks if task["item_kind"] in {"agenda", "skipped_agenda"}]
+
+    assert len(real_tasks) == 1
+    assert len(agenda_items) == 0
+
+    task = real_tasks[0]
+    assert task["normalized_text"].startswith(
+        "Разработать программу мероприятия, повестку дня заседания Научно-технического совета"
+    )
+    assert "1.1. Формирование матрицы научно-технической деятельности" in task["normalized_text"]
+    assert "1.2. Организация выездного мероприятия в одной из трех локаций:" in task["normalized_text"]
+    assert "Тюмень." in task["normalized_text"]
+    assert "Санкт-Петербург." in task["normalized_text"]
+    assert "Москва." in task["normalized_text"]
+
+    assert task["assignees_normalized"] == [
+        "Грибачев С.П.",
+        "Снастин М.А.",
+        "Ткаченко А.Н.",
+        "Чиганаев М.С.",
+        "Закиев А.А.",
+        "Идиятуллин А.Р.",
+        "Монахов Н.В.",
+        "Ершова И.В.",
+    ]
+    assert (
+        task["assignees_display"]
+        == "Грибачев С.П., Снастин М.А., Ткаченко А.Н., Чиганаев М.С., Закиев А.А., Идиятуллин А.Р., Монахов Н.В., Ершова И.В."
+    )
+    assert task["deadline_raw"] == "16.03.2026"
+    assert task["deadline_iso"] == "2026-03-16"
+    assert task["item_kind"] == "task"
+
 def test_resolution_without_numbering_is_split_by_assignee_boundaries_into_three_tasks():
     chunks = [
         "РЕШИЛИ:",
