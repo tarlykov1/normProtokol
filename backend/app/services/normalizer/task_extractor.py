@@ -347,7 +347,32 @@ def extract_task_candidates(
                 expanded_chunks.append((idx, tokenized_line))
     resolution_has_meeting_switch = any(MEETING_DECISION_SWITCH_PATTERN.match(_clean_line_prefix(line)) for _, line in expanded_chunks)
 
-    for idx, raw_line in expanded_chunks:
+    def root_item_should_be_task(start_position: int) -> bool:
+        """
+        Корневой нумерованный пункт в иерархическом протоколе считаем задачей,
+        если до следующего root-пункта у него есть вложенные подпункты и
+        присутствует собственный блок Исполнитель/Срок.
+        """
+        has_nested_content = False
+
+        for _, candidate_raw_line in expanded_chunks[start_position + 1 :]:
+            stripped_candidate_line = candidate_raw_line.strip()
+            cleaned_candidate_line = _clean_line_prefix(candidate_raw_line)
+            if not cleaned_candidate_line:
+                continue
+
+            if ASSIGNEE_LINE_PATTERN.match(cleaned_candidate_line) or DEADLINE_LINE_PATTERN.match(cleaned_candidate_line):
+                return has_nested_content
+
+            if ROOT_NUMBERED_TASK_PATTERN.match(stripped_candidate_line):
+                return False
+
+            if NESTED_NUMBERED_ITEM_PATTERN.match(stripped_candidate_line) or re.match(r"^\s*[-–—•]\s+", candidate_raw_line):
+                has_nested_content = True
+
+        return False
+
+    for position, (idx, raw_line) in enumerate(expanded_chunks):
         stripped_line = raw_line.strip()
         cleaned_line = _clean_line_prefix(raw_line)
         if not cleaned_line:
@@ -456,6 +481,7 @@ def extract_task_candidates(
                     AGENDA_HEADER_LINE_PATTERN.match(cleaned_line)
                     or "вопрос" in cleaned_line.lower()
                 )
+                and not root_item_should_be_task(position)
             ):
                 flush_current()
                 skipped_discussion = bool(NOT_DISCUSSED_PATTERN.search(cleaned_line))
@@ -505,6 +531,21 @@ def extract_task_candidates(
             continue
 
         if TASK_START_PATTERN.match(raw_line) and current_body:
+            keep_as_part_of_root_task = (
+                section_name == "task_section"
+                and current_started_by_root_numbering
+                and (
+                    nested_numbered_match is not None
+                    or re.match(r"^\s*[-–—•]\s+", raw_line) is not None
+                )
+            )
+            if keep_as_part_of_root_task:
+                if not current_source:
+                    current_order = idx
+                current_body.append(cleaned_line)
+                current_source.append(cleaned_line)
+                current_closed_by_assignee = False
+                continue
             flush_current()
 
         if not current_source:
