@@ -21,6 +21,10 @@ LIST_PREFIX_PATTERN = re.compile(r"^\s*(?:\d+(?!\.\d)[\).:-]\s*|[-–—•]\s*)
 PROJECT_CONTEXT_PATTERN = re.compile(r"^\s*проекты?\b.*:\s*$", re.IGNORECASE)
 ROOT_NUMBERED_TASK_PATTERN = re.compile(r"^\s*(?P<num>\d+)\.\s+(?P<body>.+)$")
 NESTED_NUMBERED_ITEM_PATTERN = re.compile(r"^\s*(?P<num>\d+\.\d+(?:\.\d+)*)\.?\s*(?P<body>.+)$")
+INLINE_TASK_TOKEN_SPLIT_PATTERN = re.compile(
+    r"(?:(?<=^)|(?<=\s))(?=(?:решили\s*:|исполнител(?:ь|и)\s*:|срок\s*:|\d+\.\d+(?:\.\d+)*\.?\s+|\d+\.\s+))",
+    re.IGNORECASE,
+)
 
 CONTEXT_PATTERNS = [
     re.compile(r"^\s*кластер\b.*", re.IGNORECASE),
@@ -47,6 +51,11 @@ def _normalize_topic_candidates(candidates: list[dict]) -> list[str]:
 
 def _clean_line_prefix(line: str) -> str:
     return LIST_PREFIX_PATTERN.sub("", line).strip()
+
+
+def _split_inline_task_tokens(line: str) -> list[str]:
+    parts = [part.strip() for part in INLINE_TASK_TOKEN_SPLIT_PATTERN.split(line) if part.strip()]
+    return parts or [line.strip()]
 
 
 def _parse_assignees(raw_value: str | None) -> tuple[str | None, list[str], list[str]]:
@@ -278,7 +287,8 @@ def extract_task_candidates(
     for idx, chunk in enumerate(chunks):
         lines = chunk.splitlines() or [chunk]
         for line in lines:
-            expanded_chunks.append((idx, line))
+            for tokenized_line in _split_inline_task_tokens(line):
+                expanded_chunks.append((idx, tokenized_line))
 
     for idx, raw_line in expanded_chunks:
         stripped_line = raw_line.strip()
