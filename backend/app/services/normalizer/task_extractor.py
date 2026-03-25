@@ -32,6 +32,7 @@ CONTEXT_PATTERNS = [
     re.compile(r"^\s*вопрос\s+вне\s+повестки\b.*", re.IGNORECASE),
     re.compile(r"^\s*решение\s+по\s+итогам\s+рабочей\s+встреч\b.*", re.IGNORECASE),
 ]
+MEETING_DECISION_SWITCH_PATTERN = re.compile(r"^\s*решение\s+по\s+итогам\s+рабочей\s+встречи\s+от\b.*", re.IGNORECASE)
 NOT_REVIEWED_PATTERN = re.compile(r"^\s*не\s+рассматривали\.?\s*$", re.IGNORECASE)
 NOTE_IN_BRACKETS = re.compile(r"\((?P<note>[^)]+)\)")
 ASSIGNEE_SPLIT = re.compile(r"\s*(?:,|;|/| и )\s*")
@@ -226,12 +227,14 @@ def extract_task_candidates(
     current_assignees_raw: str | None = None
     current_deadline_raw: str | None = None
     current_started_by_root_numbering = False
+    current_started_by_bullet = False
     current_closed_by_assignee = False
     current_order = 0
+    meeting_resolution_switch_active = False
 
     def flush_current() -> None:
         nonlocal current_body, current_source, current_assignees_raw, current_deadline_raw, current_order
-        nonlocal current_started_by_root_numbering, current_closed_by_assignee
+        nonlocal current_started_by_root_numbering, current_started_by_bullet, current_closed_by_assignee
         if not current_body and current_assignees_raw is None and current_deadline_raw is None:
             return
         task = _build_task(
@@ -253,7 +256,55 @@ def extract_task_candidates(
         current_assignees_raw = None
         current_deadline_raw = None
         current_started_by_root_numbering = False
+        current_started_by_bullet = False
         current_closed_by_assignee = False
+
+    def flush_current_as_context(order_index: int) -> str | None:
+        nonlocal current_body, current_source, current_assignees_raw, current_deadline_raw
+        nonlocal current_started_by_root_numbering, current_started_by_bullet, current_closed_by_assignee
+        if not current_body and current_assignees_raw is None and current_deadline_raw is None:
+            return None
+
+        context_text = " ".join(line.strip() for line in current_body if line.strip()).strip()
+        if context_text:
+            tasks.append(
+                {
+                    "source_fragment": "\n".join(current_source) if current_source else context_text,
+                    "normalized_text": context_text,
+                    "section_name": section_name,
+                    "parent_context": context_text,
+                    "context_label": "meeting_resolution_context",
+                    "assignee_raw": None,
+                    "assignees_raw": None,
+                    "assignees_normalized": [],
+                    "assignees_display": None,
+                    "coordinator": None,
+                    "deadline_raw": None,
+                    "deadline_iso": None,
+                    "deadline_kind": "empty_deadline",
+                    "deadline_note": None,
+                    "markers": ["meeting_resolution_context"],
+                    "item_kind": "agenda",
+                    "discussed_flag": True,
+                    "skipped_discussion_flag": False,
+                    "topic_auto_candidate": context_text,
+                    "topic_candidate_list": [context_text],
+                    "status": TaskStatus.excluded.value,
+                    "warnings": [],
+                    "errors": [],
+                    "order_index": order_index,
+                    "topic_confidence": 0.0,
+                }
+            )
+
+        current_body = []
+        current_source = []
+        current_assignees_raw = None
+        current_deadline_raw = None
+        current_started_by_root_numbering = False
+        current_started_by_bullet = False
+        current_closed_by_assignee = False
+        return context_text or None
 
     def build_agenda_item(label: str, skipped: bool, order_index: int) -> dict:
         clean_label = label.rstrip(":").strip()
@@ -294,6 +345,7 @@ def extract_task_candidates(
         for line in lines:
             for tokenized_line in _split_inline_task_tokens(line):
                 expanded_chunks.append((idx, tokenized_line))
+    resolution_has_meeting_switch = any(MEETING_DECISION_SWITCH_PATTERN.match(_clean_line_prefix(line)) for _, line in expanded_chunks)
 
     for idx, raw_line in expanded_chunks:
         stripped_line = raw_line.strip()
@@ -332,6 +384,14 @@ def extract_task_candidates(
             context_label = "project_context"
             continue
 
+        if section_name == "task_section" and MEETING_DECISION_SWITCH_PATTERN.match(cleaned_line):
+            context_from_pre_switch = flush_current_as_context(idx)
+            if context_from_pre_switch:
+                parent_context = context_from_pre_switch
+                context_label = "meeting_resolution_context"
+            meeting_resolution_switch_active = True
+            continue
+
         if matched_context:
             flush_current()
             parent_context = cleaned_line
@@ -345,13 +405,21 @@ def extract_task_candidates(
 
         assignee_match = ASSIGNEE_LINE_PATTERN.match(cleaned_line)
         if assignee_match:
+            suppress_until_switch = (
+                section_name == "task_section" and resolution_has_meeting_switch and not meeting_resolution_switch_active
+            )
             if current_closed_by_assignee and current_body:
                 flush_current()
             if not current_source:
                 current_order = idx
             current_assignees_raw = assignee_match.group("value")
             current_source.append(cleaned_line)
-            if section_name == "task_section" and current_body and not current_started_by_root_numbering:
+            if (
+                section_name == "task_section"
+                and current_body
+                and not current_started_by_root_numbering
+                and (meeting_resolution_switch_active or not suppress_until_switch)
+            ):
                 current_closed_by_assignee = True
             continue
 
@@ -359,7 +427,11 @@ def extract_task_candidates(
         if deadline_match:
             current_deadline_raw = deadline_match.group("value")
             current_source.append(cleaned_line)
-            flush_current()
+            suppress_until_switch = (
+                section_name == "task_section" and resolution_has_meeting_switch and not meeting_resolution_switch_active
+            )
+            if not suppress_until_switch:
+                flush_current()
             continue
 
         if section_name in {"informational", "footer", "metadata"}:
@@ -370,8 +442,15 @@ def extract_task_candidates(
             flush_current()
 
         if section_name == "task_section" and root_numbered_match:
+            if meeting_resolution_switch_active and current_started_by_bullet and current_body:
+                nested_text = f"{root_numbered_match.group('num')}. {root_numbered_match.group('body').strip()}"
+                current_body.append(nested_text)
+                current_source.append(nested_text)
+                continue
+
             if (
-                not current_body
+                not meeting_resolution_switch_active
+                and not current_body
                 and (cleaned_line.endswith(":") or NOT_DISCUSSED_PATTERN.search(cleaned_line))
                 and (
                     AGENDA_HEADER_LINE_PATTERN.match(cleaned_line)
@@ -394,6 +473,7 @@ def extract_task_candidates(
             current_body.append(root_text)
             current_source.append(root_text)
             current_started_by_root_numbering = True
+            current_started_by_bullet = False
             current_closed_by_assignee = False
             continue
 
@@ -405,6 +485,7 @@ def extract_task_candidates(
 
         if (
             section_name == "task_section"
+            and not meeting_resolution_switch_active
             and not current_body
             and (cleaned_line.endswith(":") or NOT_DISCUSSED_PATTERN.search(cleaned_line))
             and not ASSIGNEE_LINE_PATTERN.match(cleaned_line)
@@ -431,6 +512,9 @@ def extract_task_candidates(
 
         current_body.append(cleaned_line)
         current_source.append(cleaned_line)
+        if re.match(r"^\s*[-–—•]\s+", raw_line):
+            current_started_by_bullet = True
+            current_started_by_root_numbering = False
         current_closed_by_assignee = False
 
     flush_current()
