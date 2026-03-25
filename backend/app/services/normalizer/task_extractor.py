@@ -225,10 +225,13 @@ def extract_task_candidates(
     current_source: list[str] = []
     current_assignees_raw: str | None = None
     current_deadline_raw: str | None = None
+    current_started_by_root_numbering = False
+    current_closed_by_assignee = False
     current_order = 0
 
     def flush_current() -> None:
         nonlocal current_body, current_source, current_assignees_raw, current_deadline_raw, current_order
+        nonlocal current_started_by_root_numbering, current_closed_by_assignee
         if not current_body and current_assignees_raw is None and current_deadline_raw is None:
             return
         task = _build_task(
@@ -249,6 +252,8 @@ def extract_task_candidates(
         current_source = []
         current_assignees_raw = None
         current_deadline_raw = None
+        current_started_by_root_numbering = False
+        current_closed_by_assignee = False
 
     def build_agenda_item(label: str, skipped: bool, order_index: int) -> dict:
         clean_label = label.rstrip(":").strip()
@@ -340,8 +345,14 @@ def extract_task_candidates(
 
         assignee_match = ASSIGNEE_LINE_PATTERN.match(cleaned_line)
         if assignee_match:
+            if current_closed_by_assignee and current_body:
+                flush_current()
+            if not current_source:
+                current_order = idx
             current_assignees_raw = assignee_match.group("value")
             current_source.append(cleaned_line)
+            if section_name == "task_section" and current_body and not current_started_by_root_numbering:
+                current_closed_by_assignee = True
             continue
 
         deadline_match = DEADLINE_LINE_PATTERN.match(cleaned_line)
@@ -354,6 +365,9 @@ def extract_task_candidates(
         if section_name in {"informational", "footer", "metadata"}:
             # informational text is not extracted as executable tasks
             continue
+
+        if current_closed_by_assignee and section_name == "task_section" and current_body:
+            flush_current()
 
         if section_name == "task_section" and root_numbered_match:
             if (
@@ -379,6 +393,8 @@ def extract_task_candidates(
                 current_order = idx
             current_body.append(root_text)
             current_source.append(root_text)
+            current_started_by_root_numbering = True
+            current_closed_by_assignee = False
             continue
 
         if section_name == "task_section" and nested_numbered_match and current_body:
@@ -415,6 +431,7 @@ def extract_task_candidates(
 
         current_body.append(cleaned_line)
         current_source.append(cleaned_line)
+        current_closed_by_assignee = False
 
     flush_current()
 
