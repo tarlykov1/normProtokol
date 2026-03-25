@@ -6,7 +6,7 @@ import { protocolsApi } from '../shared/api/protocolsApi'
 import { tasksApi } from '../shared/api/tasksApi'
 import { BulkActionsBar } from '../features/tasks/BulkActionsBar'
 import { TasksTable } from '../features/tasks/TasksTable'
-import { usePatchTask, useProtocol } from '../features/protocol/useProtocolQueries'
+import { useDeleteProtocol, usePatchTask, useProtocol } from '../features/protocol/useProtocolQueries'
 import { EmptyState, ErrorState, LoadingState } from '../shared/ui/states'
 
 export function NormalizePage() {
@@ -15,6 +15,7 @@ export function NormalizePage() {
   const protocolId = Number(params.get('protocolId') || localStorage.getItem('lastProtocolId'))
   const { data, isLoading, error, refetch } = useProtocol(protocolId)
   const patch = usePatchTask(protocolId)
+  const deleteProtocol = useDeleteProtocol()
   const { selectedTaskIds, toggleTask, clearSelection, filters, setFilters, setAutosaveState } = useProtocolStore()
 
   useAutosaveDraft(!!data, async () => {
@@ -43,12 +44,34 @@ export function NormalizePage() {
   if (error) return <ErrorState message={(error as Error).message} />
   if (!data) return <EmptyState label="Протокол не найден" />
 
+  const clearLastProtocolPointer = (deletedProtocolId: number) => {
+    const savedLocalProtocolId = Number(localStorage.getItem('lastProtocolId'))
+    if (savedLocalProtocolId === deletedProtocolId) {
+      localStorage.removeItem('lastProtocolId')
+    }
+    const savedSessionProtocolId = Number(sessionStorage.getItem('lastProtocolId'))
+    if (savedSessionProtocolId === deletedProtocolId) {
+      sessionStorage.removeItem('lastProtocolId')
+    }
+  }
+
+  const onDeleteProtocol = async () => {
+    const shouldDelete = window.confirm(`Удалить протокол #${data.id} целиком?\nЭто удалит задачи, темы и связанные файлы.`)
+    if (!shouldDelete) return
+    await deleteProtocol.mutateAsync(data.id)
+    clearLastProtocolPointer(data.id)
+    navigate('/')
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-2 rounded border bg-white p-3 md:flex-row md:items-center md:justify-between">
         <div className="text-sm break-words">{data.original_filename} · тип: {data.protocol_type} · задач: {data.tasks.length}</div>
         <div className="flex w-full flex-wrap gap-2 md:w-auto md:flex-nowrap">
           <input className="w-full min-w-0 rounded border p-1 text-sm md:w-72" placeholder="Поиск..." value={filters.search} onChange={(e) => setFilters({ search: e.target.value })} />
+          <button className="rounded border border-red-300 px-3 py-1 text-sm text-red-700" onClick={onDeleteProtocol} disabled={deleteProtocol.isPending}>
+            {deleteProtocol.isPending ? 'Удаляем...' : 'Удалить протокол'}
+          </button>
           <button className="rounded border px-3 py-1 text-sm" onClick={() => navigate(`/topics?protocolId=${data.id}`)}>Доска тем</button>
           <button className="rounded bg-slate-900 px-3 py-1 text-sm text-white" onClick={() => navigate(`/confirm?protocolId=${data.id}`)}>К подтверждению</button>
         </div>

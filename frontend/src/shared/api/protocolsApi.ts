@@ -1,6 +1,6 @@
 import { http } from './http'
 import { mockApi } from '../lib/mockApi'
-import { Protocol, ProtocolType, PublishResult, TaskCandidate, ValidationSummary } from '../../types/domain'
+import { DeleteProtocolResult, Protocol, ProtocolType, PublishResult, TaskCandidate, ValidationSummary } from '../../types/domain'
 
 const isMock = import.meta.env.VITE_USE_MOCK_API === 'true'
 
@@ -48,5 +48,6 @@ export const protocolsApi = {
   generateDocx: async (id: number) => { await http.post(`/protocols/${id}/generate-docx`) },
   downloadDocx: async (id: number) => (await http.get(`/protocols/${id}/download-docx`, { responseType: 'blob' })).data as Blob,
   publish: async (id: number) => isMock ? mockApi.publish() : (await http.post<PublishResult>(`/protocols/${id}/publish`)).data,
+  remove: async (id: number) => (await http.delete<DeleteProtocolResult>(`/protocols/${id}`)).data,
   demoBootstrap: async () => isMock ? mockApi.getProtocol() : normalizeProtocol((await http.post<Protocol>(`/demo/bootstrap`)).data)
 }

@@ -117,6 +117,17 @@ export interface PublishResult {
   errors: string[]
 }
 
+export interface DeleteProtocolResult {
+  status: 'deleted'
+  protocol_id: number
+  deleted_audit_logs: number
+  removed_files: {
+    original_file: boolean
+    generated_docx: boolean
+    published_docx: boolean
+  }
+}
+
 export interface Assignee {
   id: string
   name: string
