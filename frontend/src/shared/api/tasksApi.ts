@@ -1,5 +1,10 @@
 import { http } from './http'
 
+export interface BulkActionResult {
+  status: string
+  count: number
+}
+
 export const tasksApi = {
   patch: async (id: number, patch: Record<string, unknown>) => { await http.patch(`/tasks/${id}`, patch) },
   create: async (payload: Record<string, unknown>) => { await http.post('/tasks', payload) },
@@ -8,8 +13,12 @@ export const tasksApi = {
   merge: async (taskIds: number[]) => { await http.post('/tasks/merge', { task_ids: taskIds }) },
   moveToTopic: async (taskIds: number[], topic_id: number | null) => { await http.post('/tasks/move-to-topic', { task_ids: taskIds, topic_id }) },
   reorder: async (taskOrders: Array<{ task_id: number; order_index: number }>) => { await http.post('/tasks/reorder', { task_orders: taskOrders }) },
-  bulkTopic: async (taskIds: number[], topic_id: number | null) => { await http.post('/topics/bulk-assign', { task_ids: taskIds, topic_id }) },
+  bulkTopic: async (taskIds: number[], topic_id: number | null): Promise<BulkActionResult> => {
+    const { data } = await http.post('/topics/bulk-assign', { task_ids: taskIds, topic_id })
+    return data
+  },
   bulkUpdate: async (payload: { task_ids: number[]; assignee_b24_name?: string | null; assignee_b24_id?: string | null; deadline_iso?: string | null; coordinator?: string | null; status?: string }) => {
-    await http.post('/tasks/bulk-update', payload)
+    const { data } = await http.post('/tasks/bulk-update', payload)
+    return data as BulkActionResult
   }
 }
