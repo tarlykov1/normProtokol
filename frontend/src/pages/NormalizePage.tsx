@@ -1,13 +1,14 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useProtocolStore } from '../features/protocol/protocolStore'
 import { useAutosaveDraft } from '../shared/hooks/useAutosaveDraft'
 import { protocolsApi } from '../shared/api/protocolsApi'
 import { tasksApi } from '../shared/api/tasksApi'
-import { BulkActionsBar } from '../features/tasks/BulkActionsBar'
+import { BulkActionType, BulkActionsBar } from '../features/tasks/BulkActionsBar'
 import { TasksTable } from '../features/tasks/TasksTable'
 import { useDeleteProtocol, usePatchTask, useProtocol } from '../features/protocol/useProtocolQueries'
 import { EmptyState, ErrorState, LoadingState } from '../shared/ui/states'
+import { ToastMessage, ToastStack } from '../shared/ui/ToastStack'
 
 export function NormalizePage() {
   const navigate = useNavigate()
@@ -17,6 +18,54 @@ export function NormalizePage() {
   const patch = usePatchTask(protocolId)
   const deleteProtocol = useDeleteProtocol()
   const { selectedTaskIds, toggleTask, clearSelection, filters, setFilters, setAutosaveState } = useProtocolStore()
+  const [pendingBulkAction, setPendingBulkAction] = useState<BulkActionType | null>(null)
+  const [toasts, setToasts] = useState<ToastMessage[]>([])
+
+  const pushToast = useCallback((payload: Omit<ToastMessage, 'id'>) => {
+    setToasts((prev) => [...prev, { ...payload, id: Date.now() + Math.random() }])
+  }, [])
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id))
+  }, [])
+
+  const getErrorMessage = (error: unknown) => {
+    if (error instanceof Error && error.message.trim()) return error.message
+    return 'Попробуйте повторить позже или обратитесь к администратору.'
+  }
+
+  const showBulkResultToast = ({
+    total,
+    success,
+    errorCount,
+    errorMessage
+  }: {
+    total: number
+    success: number
+    errorCount: number
+    errorMessage?: string
+  }) => {
+    if (errorCount > 0 && success > 0) {
+      pushToast({
+        kind: 'error',
+        text: `Из ${total} задач обновлено ${success}, ${errorCount} — с ошибкой.`,
+        detail: errorMessage
+      })
+      return
+    }
+    if (errorCount > 0) {
+      pushToast({
+        kind: 'error',
+        text: 'Не удалось применить изменения',
+        detail: errorMessage || 'Попробуйте повторить действие позже.'
+      })
+      return
+    }
+    pushToast({
+      kind: 'success',
+      text: total > 1 ? `Изменения применены (${success} из ${total})` : 'Изменения применены'
+    })
+  }
 
   useAutosaveDraft(!!data, async () => {
     if (!data) return
@@ -63,6 +112,36 @@ export function NormalizePage() {
     navigate('/')
   }
 
+  const runBulkAction = async (
+    action: BulkActionType,
+    operation: (selectedIds: number[]) => Promise<{ success: number; errorCount: number; errorMessage?: string }>
+  ) => {
+    if (pendingBulkAction || selectedTaskIds.length === 0) return
+    const targetIds = [...selectedTaskIds]
+    setPendingBulkAction(action)
+    try {
+      const result = await operation(targetIds)
+      await refetch()
+      if (result.errorCount === 0 && result.success > 0) {
+        clearSelection()
+      }
+      showBulkResultToast({
+        total: targetIds.length,
+        success: result.success,
+        errorCount: result.errorCount,
+        errorMessage: result.errorMessage
+      })
+    } catch (error) {
+      pushToast({
+        kind: 'error',
+        text: 'Не удалось применить изменения',
+        detail: getErrorMessage(error)
+      })
+    } finally {
+      setPendingBulkAction(null)
+    }
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-2 rounded border bg-white p-3 md:flex-row md:items-center md:justify-between">
@@ -89,11 +168,29 @@ export function NormalizePage() {
       <BulkActionsBar
         count={selectedTaskIds.length}
         topics={data.topics}
-        onTopic={async (topicId) => { await tasksApi.bulkTopic(selectedTaskIds, topicId); clearSelection(); await refetch() }}
-        onBulkUpdate={async (payload) => { await tasksApi.bulkUpdate({ task_ids: selectedTaskIds, ...payload }); await refetch() }}
-        onDelete={async () => { await Promise.all(selectedTaskIds.map((id) => tasksApi.remove(id))); clearSelection(); await refetch() }}
+        pendingAction={pendingBulkAction}
+        onTopic={async (topicId) => runBulkAction('topic', async (taskIds) => {
+          const result = await tasksApi.bulkTopic(taskIds, topicId)
+          const success = Math.min(result.count ?? 0, taskIds.length)
+          return { success, errorCount: Math.max(taskIds.length - success, 0) }
+        })}
+        onBulkUpdate={async (action, payload) => runBulkAction(action, async (taskIds) => {
+          const result = await tasksApi.bulkUpdate({ task_ids: taskIds, ...payload })
+          const success = Math.min(result.count ?? 0, taskIds.length)
+          return { success, errorCount: Math.max(taskIds.length - success, 0) }
+        })}
+        onDelete={async () => runBulkAction('delete', async (taskIds) => {
+          const settled = await Promise.allSettled(taskIds.map((id) => tasksApi.remove(id)))
+          const success = settled.filter((item) => item.status === 'fulfilled').length
+          const firstError = settled.find((item) => item.status === 'rejected')
+          const errorMessage = firstError && firstError.status === 'rejected'
+            ? getErrorMessage(firstError.reason)
+            : undefined
+          return { success, errorCount: taskIds.length - success, errorMessage }
+        })}
       />
       <TasksTable tasks={filtered} topics={data.topics} selectedIds={selectedTaskIds} onToggle={toggleTask} onPatch={(id, p) => patch.mutate({ id, patch: p })} />
+      <ToastStack toasts={toasts} onClose={dismissToast} />
     </div>
   )
 }
