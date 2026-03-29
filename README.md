@@ -151,3 +151,42 @@ bash clean.sh
 ## Разработка локально
 
 Если нужен прежний dev-сценарий — можно запускать сервисы отдельно, но для серверного окружения рекомендуется только путь через `bootstrap.sh` + `deploy.sh`.
+
+---
+
+## Data-plane migration sprint (enterprise baseline extension)
+
+В backend добавлен первый end-to-end data-plane слой миграции с безопасным mapping-first подходом.
+
+Ключевые команды/операции:
+
+- CLI (`python -m app.cli`):
+  - `run:create`
+  - `users:map`
+  - `users:review`
+  - `users:override`
+  - `groups:sync`
+  - `projects:sync`
+  - `tasks:migrate`
+  - `verify:counts`
+  - `verify:relations`
+  - `verify:integrity`
+  - `verify:files`
+
+- HTTP API (`/api/migration/*`):
+  - запуск run, users mapping/review/override,
+  - sync/migrate для groups/projects/tasks/comments/files,
+  - execute/resume,
+  - verification результаты (`counts/relations/integrity/files`) + history list.
+
+### Что блокирует execute
+
+- Наличие `ambiguous` или `unmatched` users mapping блокирует безопасное продолжение зависимых доменов.
+- Tasks/comments/file refs не выполняются silently при unresolved ссылках — возвращают `blocked`/`partial` c деталями ошибок.
+
+### Files partial
+
+- Реализован только metadata/reference слой (`file_refs`).
+- Heavy payload transfer в target честно помечен как pending и верифицируется со статусом `partial`.
+
+Подробная матрица статусов доменов: `docs/data_plane_migration_matrix.md`.

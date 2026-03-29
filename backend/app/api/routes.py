@@ -41,6 +41,7 @@ from app.services.parser.docx_parser import extract_docx_text
 from app.services.topics.matcher import load_topics
 from app.services.validator.document_validator import suggest_protocol_status
 from app.services.validator.task_validator import validate_duplicates, validate_task
+from app.api.migration_routes import router as migration_router
 
 router = APIRouter(prefix="/api", tags=["protocols"])
 extractor_registry = TaskExtractorRegistry()
@@ -600,3 +601,6 @@ def search_assignees(q: str = Query(default="")):
         return [{"id": user.id, "name": user.name} for user in service.search_users(q)]
     except BitrixUnavailableError:
         raise HTTPException(status_code=503, detail="Сервис Bitrix24 временно недоступен") from None
+
+
+router.include_router(migration_router)

@@ -9,6 +9,8 @@ from app.core.config import settings
 from app.db.seed import seed_data
 from app.db.session import engine
 from app.models.base import Base
+from app.models import entities as _entities  # noqa: F401
+from app.models import migration as _migration  # noqa: F401
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("app.startup")
